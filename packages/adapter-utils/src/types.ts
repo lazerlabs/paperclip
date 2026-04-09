@@ -209,6 +209,12 @@ export interface AdapterEnvironmentTestContext {
   };
 }
 
+export interface AdapterModelDiscoveryContext {
+  companyId: string;
+  adapterType: string;
+  config: Record<string, unknown>;
+}
+
 /** Payload for the onHireApproved adapter lifecycle hook (e.g. join-request or hire_agent approval). */
 export interface HireApprovedPayload {
   companyId: string;
@@ -299,7 +305,7 @@ export interface ServerAdapterModule {
   sessionManagement?: import("./session-compaction.js").AdapterSessionManagement;
   supportsLocalAgentJwt?: boolean;
   models?: AdapterModel[];
-  listModels?: () => Promise<AdapterModel[]>;
+  listModels?: (ctx?: AdapterModelDiscoveryContext) => Promise<AdapterModel[]>;
   agentConfigurationDoc?: string;
   /**
    * Optional lifecycle hook when an agent is approved/hired (join-request or hire_agent approval).
@@ -398,6 +404,8 @@ export interface CreateConfigValues {
   instructionsFilePath?: string;
   promptTemplate: string;
   model: string;
+  baseUrl?: string;
+  headersJson?: string;
   thinkingEffort: string;
   chrome: boolean;
   dangerouslySkipPermissions: boolean;

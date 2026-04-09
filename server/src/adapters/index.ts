@@ -19,6 +19,7 @@ export type {
   AdapterEnvironmentTestStatus,
   AdapterEnvironmentTestResult,
   AdapterEnvironmentTestContext,
+  AdapterModelDiscoveryContext,
   AdapterSessionCodec,
   UsageSummary,
   AdapterAgent,

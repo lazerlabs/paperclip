@@ -2,7 +2,11 @@ import type { UIAdapterModule } from "./types";
 import { claudeLocalUIAdapter } from "./claude-local";
 import { codexLocalUIAdapter } from "./codex-local";
 import { cursorLocalUIAdapter } from "./cursor";
+import { openAiApiUIAdapter } from "./openai-api";
+import { anthropicApiUIAdapter } from "./anthropic-api";
 import { geminiLocalUIAdapter } from "./gemini-local";
+import { geminiApiUIAdapter } from "./gemini-api";
+import { openAiCompatibleUIAdapter } from "./openai-compatible";
 import { openCodeLocalUIAdapter } from "./opencode-local";
 import { piLocalUIAdapter } from "./pi-local";
 import { openClawGatewayUIAdapter } from "./openclaw-gateway";
@@ -49,7 +53,11 @@ function registerBuiltInUIAdapters() {
   for (const adapter of [
     claudeLocalUIAdapter,
     codexLocalUIAdapter,
+    openAiApiUIAdapter,
+    anthropicApiUIAdapter,
     geminiLocalUIAdapter,
+    geminiApiUIAdapter,
+    openAiCompatibleUIAdapter,
     hermesLocalUIAdapter,
     openCodeLocalUIAdapter,
     piLocalUIAdapter,

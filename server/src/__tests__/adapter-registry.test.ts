@@ -29,6 +29,13 @@ const externalAdapter: ServerAdapterModule = {
 };
 
 describe("server adapter registry", () => {
+  it("registers new built-in SDK-backed adapters", () => {
+    expect(findServerAdapter("openai_api")).not.toBeNull();
+    expect(findServerAdapter("anthropic_api")).not.toBeNull();
+    expect(findServerAdapter("gemini_api")).not.toBeNull();
+    expect(findServerAdapter("openai_compatible")).not.toBeNull();
+  });
+
   beforeEach(() => {
     unregisterServerAdapter("external_test");
     unregisterServerAdapter("claude_local");

@@ -28,8 +28,12 @@ import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
   DEFAULT_CODEX_LOCAL_MODEL,
 } from "@paperclipai/adapter-codex-local";
+import { DEFAULT_OPENAI_API_MODEL } from "@paperclipai/adapter-openai-api";
+import { DEFAULT_ANTHROPIC_API_MODEL } from "@paperclipai/adapter-anthropic-api";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
+import { DEFAULT_GEMINI_API_MODEL } from "@paperclipai/adapter-gemini-api";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
+import { DEFAULT_OPENAI_COMPATIBLE_MODEL } from "@paperclipai/adapter-openai-compatible";
 
 function createValuesForAdapterType(
   adapterType: CreateConfigValues["adapterType"],
@@ -40,10 +44,18 @@ function createValuesForAdapterType(
     nextValues.model = DEFAULT_CODEX_LOCAL_MODEL;
     nextValues.dangerouslyBypassSandbox =
       DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX;
+  } else if (adapterType === "openai_api") {
+    nextValues.model = DEFAULT_OPENAI_API_MODEL;
+  } else if (adapterType === "anthropic_api") {
+    nextValues.model = DEFAULT_ANTHROPIC_API_MODEL;
   } else if (adapterType === "gemini_local") {
     nextValues.model = DEFAULT_GEMINI_LOCAL_MODEL;
+  } else if (adapterType === "gemini_api") {
+    nextValues.model = DEFAULT_GEMINI_API_MODEL;
   } else if (adapterType === "cursor") {
     nextValues.model = DEFAULT_CURSOR_LOCAL_MODEL;
+  } else if (adapterType === "openai_compatible") {
+    nextValues.model = DEFAULT_OPENAI_COMPATIBLE_MODEL;
   } else if (adapterType === "opencode_local") {
     nextValues.model = "";
   }

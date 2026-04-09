@@ -14,8 +14,12 @@ import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
   DEFAULT_CODEX_LOCAL_MODEL,
 } from "@paperclipai/adapter-codex-local";
+import { DEFAULT_OPENAI_API_MODEL } from "@paperclipai/adapter-openai-api";
+import { DEFAULT_ANTHROPIC_API_MODEL } from "@paperclipai/adapter-anthropic-api";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
+import { DEFAULT_GEMINI_API_MODEL } from "@paperclipai/adapter-gemini-api";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
+import { DEFAULT_OPENAI_COMPATIBLE_MODEL } from "@paperclipai/adapter-openai-compatible";
 import {
   Popover,
   PopoverContent,
@@ -163,6 +167,24 @@ const claudeThinkingEffortOptions = [
   { id: "high", label: "High" },
 ] as const;
 
+const NONLOCAL_TYPES = new Set(["process", "http", "openclaw_gateway"]);
+const CLI_ADAPTER_TYPES = new Set([
+  "claude_local",
+  "codex_local",
+  "cursor",
+  "gemini_local",
+  "opencode_local",
+  "pi_local",
+  "hermes_local",
+]);
+
+const API_ADAPTER_TYPES = new Set([
+  "openai_api",
+  "anthropic_api",
+  "gemini_api",
+  "openai_compatible",
+]);
+
 
 /* ---- Form ---- */
 
@@ -273,10 +295,22 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const getCapabilities = useAdapterCapabilities();
   const adapterCaps = getCapabilities(adapterType);
   const isLocal = adapterCaps.supportsInstructionsBundle || adapterCaps.supportsSkills || adapterCaps.supportsLocalAgentJwt;
+  const isApiAdapter = API_ADAPTER_TYPES.has(adapterType);
+  const showCliCommandFields = CLI_ADAPTER_TYPES.has(adapterType);
+  const supportsDetectModel = CLI_ADAPTER_TYPES.has(adapterType);
   
   const showLegacyWorkingDirectoryField =
     isLocal && shouldShowLegacyWorkingDirectoryField({ isCreate, adapterConfig: config });
   const uiAdapter = useMemo(() => getUIAdapter(adapterType), [adapterType]);
+  const currentEnvConfig = isCreate
+    ? ((props.values.envBindings ?? EMPTY_ENV) as Record<string, EnvBinding>)
+    : (eff("adapterConfig", "env", (config.env ?? EMPTY_ENV) as Record<string, EnvBinding>));
+  const currentBaseUrl = isCreate
+    ? (props.values.baseUrl ?? "")
+    : eff("adapterConfig", "baseUrl", String(config.baseUrl ?? ""));
+  const currentHeaders = isCreate
+    ? (props.values.headersJson ?? "")
+    : JSON.stringify(eff("adapterConfig", "headers", config.headers ?? {}));
 
   // Fetch adapter models for the effective adapter type
   const {
@@ -289,7 +323,26 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     queryFn: () => agentsApi.adapterModels(selectedCompanyId!, adapterType),
     enabled: Boolean(selectedCompanyId),
   });
-  const models = fetchedModels ?? externalModels ?? [];
+  const [discoveredApiModels, setDiscoveredApiModels] = useState<AdapterModel[] | null>(null);
+  useEffect(() => {
+    setDiscoveredApiModels(null);
+  }, [adapterType, selectedCompanyId]);
+  useEffect(() => {
+    if (!isApiAdapter) return;
+    setDiscoveredApiModels(null);
+  }, [isApiAdapter, currentEnvConfig, currentBaseUrl, currentHeaders]);
+  const discoverApiModels = useMutation({
+    mutationFn: async () => {
+      if (!selectedCompanyId) {
+        throw new Error("Select a company to load adapter models");
+      }
+      return agentsApi.adapterModels(selectedCompanyId, adapterType, buildAdapterConfigForTest());
+    },
+    onSuccess: (nextModels) => {
+      setDiscoveredApiModels(nextModels);
+    },
+  });
+  const models = discoveredApiModels ?? fetchedModels ?? externalModels ?? [];
   const {
     data: detectedModelData,
     refetch: refetchDetectedModel,
@@ -303,7 +356,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       }
       return agentsApi.detectModel(selectedCompanyId, adapterType);
     },
-    enabled: Boolean(selectedCompanyId && isLocal),
+    enabled: Boolean(selectedCompanyId && supportsDetectModel),
   });
   const detectedModel = detectedModelData?.model ?? null;
   const detectedModelCandidates = detectedModelData?.candidates ?? [];
@@ -393,7 +446,11 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       : adapterType === "opencode_local"
         ? eff("adapterConfig", "variant", String(config.variant ?? ""))
       : eff("adapterConfig", "effort", String(config.effort ?? ""));
-  const showThinkingEffort = adapterType !== "gemini_local";
+  const showThinkingEffort =
+    adapterType === "claude_local" ||
+    adapterType === "codex_local" ||
+    adapterType === "cursor" ||
+    adapterType === "opencode_local";
   const codexSearchEnabled = adapterType === "codex_local"
     ? (isCreate ? Boolean(val!.search) : eff("adapterConfig", "search", Boolean(config.search)))
     : false;
@@ -554,6 +611,14 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                       nextValues.model = DEFAULT_CURSOR_LOCAL_MODEL;
                     } else if (t === "opencode_local") {
                       nextValues.model = "";
+                    } else if (t === "openai_api") {
+                      nextValues.model = DEFAULT_OPENAI_API_MODEL;
+                    } else if (t === "anthropic_api") {
+                      nextValues.model = DEFAULT_ANTHROPIC_API_MODEL;
+                    } else if (t === "gemini_api") {
+                      nextValues.model = DEFAULT_GEMINI_API_MODEL;
+                    } else if (t === "openai_compatible") {
+                      nextValues.model = DEFAULT_OPENAI_COMPATIBLE_MODEL;
                     }
                     set!(nextValues);
                   } else {
@@ -570,6 +635,14 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                               ? DEFAULT_GEMINI_LOCAL_MODEL
                             : t === "cursor"
                               ? DEFAULT_CURSOR_LOCAL_MODEL
+                            : t === "openai_api"
+                              ? DEFAULT_OPENAI_API_MODEL
+                            : t === "anthropic_api"
+                              ? DEFAULT_ANTHROPIC_API_MODEL
+                            : t === "gemini_api"
+                              ? DEFAULT_GEMINI_API_MODEL
+                            : t === "openai_compatible"
+                              ? DEFAULT_OPENAI_COMPATIBLE_MODEL
                             : "",
                         effort: "",
                         modelReasoningEffort: "",
@@ -654,13 +727,14 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       </div>
 
       {/* ---- Permissions & Configuration ---- */}
-      {isLocal && (
+          {isLocal && (
         <div className={cn(!cards && "border-b border-border")}>
           {cards
             ? <h3 className="text-sm font-medium mb-3">Permissions &amp; Configuration</h3>
             : <div className="px-4 py-2 text-xs font-medium text-muted-foreground">Permissions &amp; Configuration</div>
           }
           <div className={cn(cards ? "border border-border rounded-lg p-4 space-y-3" : "px-4 pb-3 space-y-3")}>
+              {showCliCommandFields && (
               <Field label="Command" hint={help.localCommand}>
                 <DraftInput
                   value={
@@ -687,6 +761,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   }
                 />
               </Field>
+              )}
 
               <ModelDropdown
                 models={models}
@@ -698,24 +773,52 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                 }
                 open={modelOpen}
                 onOpenChange={setModelOpen}
-                allowDefault={adapterType !== "opencode_local"}
-                required={adapterType === "opencode_local"}
+                allowDefault={!isApiAdapter && adapterType !== "opencode_local"}
+                required={isApiAdapter || adapterType === "opencode_local"}
                 groupByProvider={adapterType === "opencode_local"}
                 creatable
                 detectedModel={detectedModel}
                 detectedModelCandidates={[]}
-                onDetectModel={async () => {
-                  const result = await refetchDetectedModel();
-                  return result.data?.model ?? null;
-                }}
-                detectModelLabel="Detect model"
-                emptyDetectHint="No model detected. Select or enter one manually."
+                onDetectModel={supportsDetectModel
+                  ? async () => {
+                      const result = await refetchDetectedModel();
+                      return result.data?.model ?? null;
+                    }
+                  : undefined}
+                detectModelLabel={supportsDetectModel ? "Detect model" : undefined}
+                emptyDetectHint={
+                  supportsDetectModel ? "No model detected. Select or enter one manually." : undefined
+                }
               />
+              {isApiAdapter && (
+                <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">
+                    Load the live provider model list using the current env bindings.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2.5 text-xs shrink-0"
+                    onClick={() => discoverApiModels.mutate()}
+                    disabled={discoverApiModels.isPending || !selectedCompanyId}
+                  >
+                    {discoverApiModels.isPending ? "Loading..." : "Refresh models"}
+                  </Button>
+                </div>
+              )}
               {fetchedModelsError && (
                 <p className="text-xs text-destructive">
                   {fetchedModelsError instanceof Error
                     ? fetchedModelsError.message
                     : "Failed to load adapter models."}
+                </p>
+              )}
+              {discoverApiModels.error && (
+                <p className="text-xs text-destructive">
+                  {discoverApiModels.error instanceof Error
+                    ? discoverApiModels.error.message
+                    : "Failed to discover adapter models."}
                 </p>
               )}
 
@@ -772,6 +875,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
               )}
               <uiAdapter.ConfigFields {...adapterFieldProps} />
 
+              {showCliCommandFields && (
               <Field label="Extra args (comma-separated)" hint={help.extraArgs}>
                 <DraftInput
                   value={
@@ -789,6 +893,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   placeholder="e.g. --verbose, --foo=bar"
                 />
               </Field>
+              )}
 
               <Field label="Environment variables" hint={help.envVars}>
                 <EnvVarEditor

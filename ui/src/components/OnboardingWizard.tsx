@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AdapterEnvironmentTestResult } from "@paperclipai/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { AdapterEnvironmentTestResult, CompanySecret, EnvBinding } from "@paperclipai/shared";
 import { useLocation, useNavigate, useParams } from "@/lib/router";
 import { useDialog } from "../context/DialogContext";
 import { useCompany } from "../context/CompanyContext";
 import { companiesApi } from "../api/companies";
 import { goalsApi } from "../api/goals";
 import { agentsApi } from "../api/agents";
+import { secretsApi } from "../api/secrets";
 import { issuesApi } from "../api/issues";
 import { projectsApi } from "../api/projects";
 import { queryKeys } from "../lib/queryKeys";
@@ -41,8 +42,13 @@ import {
 } from "@paperclipai/adapter-codex-local";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
+import { DEFAULT_OPENAI_API_MODEL } from "@paperclipai/adapter-openai-api";
+import { DEFAULT_ANTHROPIC_API_MODEL } from "@paperclipai/adapter-anthropic-api";
+import { DEFAULT_GEMINI_API_MODEL } from "@paperclipai/adapter-gemini-api";
+import { DEFAULT_OPENAI_COMPATIBLE_MODEL } from "@paperclipai/adapter-openai-compatible";
 import { resolveRouteOnboardingOptions } from "../lib/onboarding-route";
 import { AsciiArtAnimation } from "./AsciiArtAnimation";
+import { EnvVarEditor } from "./AgentConfigForm";
 import {
   Building2,
   Bot,
@@ -112,6 +118,9 @@ export function OnboardingWizard() {
   const [command, setCommand] = useState("");
   const [args, setArgs] = useState("");
   const [url, setUrl] = useState("");
+  const [envBindings, setEnvBindings] = useState<Record<string, EnvBinding>>({});
+  const [baseUrl, setBaseUrl] = useState("");
+  const [headersJson, setHeadersJson] = useState("");
   const [adapterEnvResult, setAdapterEnvResult] =
     useState<AdapterEnvironmentTestResult | null>(null);
   const [adapterEnvError, setAdapterEnvError] = useState<string | null>(null);
@@ -202,18 +211,61 @@ export function OnboardingWizard() {
   const getCapabilities = useAdapterCapabilities();
   const adapterCaps = getCapabilities(adapterType);
   const isLocalAdapter = adapterCaps.supportsInstructionsBundle || adapterCaps.supportsSkills || adapterCaps.supportsLocalAgentJwt;
+  const { data: availableSecrets = [] } = useQuery({
+    queryKey: createdCompanyId ? queryKeys.secrets.list(createdCompanyId) : ["secrets", "none"],
+    queryFn: () => secretsApi.list(createdCompanyId!),
+    enabled: Boolean(createdCompanyId) && effectiveOnboardingOpen && step === 2,
+  });
+  const createSecret = useMutation({
+    mutationFn: (input: { name: string; value: string }) => {
+      if (!createdCompanyId) throw new Error("Create or select a company before creating secrets");
+      return secretsApi.create(createdCompanyId, input);
+    },
+    onSuccess: () => {
+      if (!createdCompanyId) return;
+      queryClient.invalidateQueries({ queryKey: queryKeys.secrets.list(createdCompanyId) });
+    },
+  });
+  const [discoveredApiModels, setDiscoveredApiModels] = useState<Array<{ id: string; label: string }> | null>(null);
+  const discoverApiModels = useMutation({
+    mutationFn: async () => {
+      if (!createdCompanyId) {
+        throw new Error(`Create or select a ${onboardingTerms.singular} before loading adapter models.`);
+      }
+      return agentsApi.adapterModels(createdCompanyId, adapterType, buildAdapterConfig());
+    },
+    onSuccess: (nextModels) => {
+      setDiscoveredApiModels(nextModels);
+    },
+  });
+  const NONLOCAL_TYPES = new Set(["process", "http", "openclaw_gateway"]);
+  const isLocalAdapter = !NONLOCAL_TYPES.has(adapterType);
+  const isApiAdapter = adapterType === "openai_api"
+    || adapterType === "anthropic_api"
+    || adapterType === "gemini_api"
+    || adapterType === "openai_compatible";
+  const isCliAdapter = adapterType === "claude_local"
+    || adapterType === "codex_local"
+    || adapterType === "cursor"
+    || adapterType === "gemini_local"
+    || adapterType === "opencode_local"
+    || adapterType === "pi_local"
+    || adapterType === "hermes_local";
 
   // Build adapter grids dynamically from the UI registry + display metadata.
   // External/plugin adapters automatically appear with generic defaults.
-  const { recommendedAdapters, moreAdapters } = useMemo(() => {
+  const { localAdapters, apiAdapters, moreAdapters } = useMemo(() => {
     const SYSTEM_ADAPTER_TYPES = new Set(["process", "http"]);
     const all = listUIAdapters()
       .filter((a) => !SYSTEM_ADAPTER_TYPES.has(a.type) && !disabledTypes.has(a.type))
       .map((a) => ({ ...getAdapterDisplay(a.type), type: a.type }));
+    const apiTypes = new Set(["openai_api", "anthropic_api", "gemini_api", "openai_compatible"]);
+    const visible = all.filter((a) => !a.comingSoon);
 
     return {
-      recommendedAdapters: all.filter((a) => a.recommended),
-      moreAdapters: all.filter((a) => !a.recommended),
+      localAdapters: visible.filter((a) => !apiTypes.has(a.type) && a.type !== "openclaw_gateway"),
+      apiAdapters: visible.filter((a) => apiTypes.has(a.type)),
+      moreAdapters: all.filter((a) => a.comingSoon || a.type === "openclaw_gateway"),
     };
   }, [disabledTypes]);
   const COMMAND_PLACEHOLDERS: Record<string, string> = {
@@ -232,9 +284,15 @@ export function OnboardingWizard() {
     if (step !== 2) return;
     setAdapterEnvResult(null);
     setAdapterEnvError(null);
-  }, [step, adapterType, model, command, args, url]);
+  }, [step, adapterType, model, command, args, url, envBindings, baseUrl, headersJson]);
 
-  const selectedModel = (adapterModels ?? []).find((m) => m.id === model);
+  useEffect(() => {
+    if (!isApiAdapter) return;
+    setDiscoveredApiModels(null);
+  }, [isApiAdapter, envBindings, baseUrl, headersJson]);
+
+  const effectiveAdapterModels = discoveredApiModels ?? adapterModels ?? [];
+  const selectedModel = effectiveAdapterModels.find((m) => m.id === model);
   const hasAnthropicApiKeyOverrideCheck =
     adapterEnvResult?.checks.some(
       (check) =>
@@ -246,7 +304,7 @@ export function OnboardingWizard() {
     hasAnthropicApiKeyOverrideCheck;
   const filteredModels = useMemo(() => {
     const query = modelSearch.trim().toLowerCase();
-    return (adapterModels ?? []).filter((entry) => {
+    return effectiveAdapterModels.filter((entry) => {
       if (!query) return true;
       const provider = extractProviderIdWithFallback(entry.id, "");
       return (
@@ -255,7 +313,7 @@ export function OnboardingWizard() {
         provider.toLowerCase().includes(query)
       );
     });
-  }, [adapterModels, modelSearch]);
+  }, [effectiveAdapterModels, modelSearch]);
   const groupedModels = useMemo(() => {
     if (adapterType !== "opencode_local") {
       return [
@@ -280,6 +338,45 @@ export function OnboardingWizard() {
       }));
   }, [filteredModels, adapterType]);
 
+  function handleAdapterSelect(nextType: string) {
+    setAdapterType(nextType);
+    setDiscoveredApiModels(null);
+
+    if (nextType === "codex_local") {
+      setModel(DEFAULT_CODEX_LOCAL_MODEL);
+      return;
+    }
+    if (nextType === "gemini_local") {
+      setModel(DEFAULT_GEMINI_LOCAL_MODEL);
+      return;
+    }
+    if (nextType === "cursor") {
+      setModel(DEFAULT_CURSOR_LOCAL_MODEL);
+      return;
+    }
+    if (nextType === "openai_api") {
+      setModel(DEFAULT_OPENAI_API_MODEL);
+      return;
+    }
+    if (nextType === "anthropic_api") {
+      setModel(DEFAULT_ANTHROPIC_API_MODEL);
+      return;
+    }
+    if (nextType === "gemini_api") {
+      setModel(DEFAULT_GEMINI_API_MODEL);
+      return;
+    }
+    if (nextType === "openai_compatible") {
+      setModel(DEFAULT_OPENAI_COMPATIBLE_MODEL);
+      return;
+    }
+    if (nextType === "opencode_local") {
+      setModel((current) => (current.includes("/") ? current : ""));
+      return;
+    }
+    setModel("");
+  }
+
   function reset() {
     setStep(1);
     setLoading(false);
@@ -292,6 +389,10 @@ export function OnboardingWizard() {
     setCommand("");
     setArgs("");
     setUrl("");
+    setEnvBindings({});
+    setBaseUrl("");
+    setHeadersJson("");
+    setDiscoveredApiModels(null);
     setAdapterEnvResult(null);
     setAdapterEnvError(null);
     setAdapterEnvLoading(false);
@@ -320,14 +421,25 @@ export function OnboardingWizard() {
       model:
         adapterType === "codex_local"
           ? model || DEFAULT_CODEX_LOCAL_MODEL
+          : adapterType === "openai_api"
+            ? model || DEFAULT_OPENAI_API_MODEL
+          : adapterType === "anthropic_api"
+            ? model || DEFAULT_ANTHROPIC_API_MODEL
           : adapterType === "gemini_local"
             ? model || DEFAULT_GEMINI_LOCAL_MODEL
+          : adapterType === "gemini_api"
+            ? model || DEFAULT_GEMINI_API_MODEL
           : adapterType === "cursor"
           ? model || DEFAULT_CURSOR_LOCAL_MODEL
+          : adapterType === "openai_compatible"
+            ? model || DEFAULT_OPENAI_COMPATIBLE_MODEL
           : model,
       command,
       args,
       url,
+      envBindings,
+      baseUrl,
+      headersJson,
       dangerouslySkipPermissions:
         adapterType === "claude_local" || adapterType === "opencode_local",
       dangerouslyBypassSandbox:
@@ -743,48 +855,69 @@ export function OnboardingWizard() {
                     />
                   </div>
 
-                  {/* Adapter type radio cards */}
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-2 block">
-                      Adapter type
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {recommendedAdapters.map((opt) => (
-                        <button
-                          key={opt.type}
-                          className={cn(
-                            "flex flex-col items-center gap-1.5 rounded-md border p-3 text-xs transition-colors relative",
-                            adapterType === opt.type
-                              ? "border-foreground bg-accent"
-                              : "border-border hover:bg-accent/50"
-                          )}
-                          onClick={() => {
-                            const nextType = opt.type;
-                            setAdapterType(nextType);
-                            if (nextType === "codex_local" && !model) {
-                              setModel(DEFAULT_CODEX_LOCAL_MODEL);
-                            }
-                            if (nextType !== "codex_local") {
-                              setModel("");
-                            }
-                          }}
-                        >
-                          {opt.recommended && (
-                            <span className="absolute -top-1.5 right-1.5 bg-green-500 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-full leading-none">
-                              Recommended
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-2 block">
+                        Local agents
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {localAdapters.map((opt) => (
+                          <button
+                            key={opt.type}
+                            type="button"
+                            className={cn(
+                              "flex flex-col items-center gap-1.5 rounded-md border p-3 text-xs transition-colors relative",
+                              adapterType === opt.type
+                                ? "border-foreground bg-accent"
+                                : "border-border hover:bg-accent/50"
+                            )}
+                            onClick={() => handleAdapterSelect(opt.type)}
+                          >
+                            {opt.recommended && (
+                              <span className="absolute -top-1.5 right-1.5 bg-green-500 text-white text-[9px] font-semibold px-1.5 py-0.5 rounded-full leading-none">
+                                Recommended
+                              </span>
+                            )}
+                            <opt.icon className="h-4 w-4" />
+                            <span className="font-medium">{opt.label}</span>
+                            <span className="text-muted-foreground text-[10px]">
+                              {opt.description}
                             </span>
-                          )}
-                          <opt.icon className="h-4 w-4" />
-                          <span className="font-medium">{opt.label}</span>
-                          <span className="text-muted-foreground text-[10px]">
-                            {opt.description}
-                          </span>
-                        </button>
-                      ))}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-2 block">
+                        API adapters
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {apiAdapters.map((opt) => (
+                          <button
+                            key={opt.type}
+                            type="button"
+                            className={cn(
+                              "flex flex-col items-center gap-1.5 rounded-md border p-3 text-xs transition-colors",
+                              adapterType === opt.type
+                                ? "border-foreground bg-accent"
+                                : "border-border hover:bg-accent/50"
+                            )}
+                            onClick={() => handleAdapterSelect(opt.type)}
+                          >
+                            <opt.icon className="h-4 w-4" />
+                            <span className="font-medium">{opt.label}</span>
+                            <span className="text-muted-foreground text-[10px]">
+                              {opt.description}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <button
-                      className="flex items-center gap-1.5 mt-3 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      type="button"
+                      className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
                       onClick={() => setShowMoreAdapters((v) => !v)}
                     >
                       <ChevronDown
@@ -797,38 +930,23 @@ export function OnboardingWizard() {
                     </button>
 
                     {showMoreAdapters && (
-                      <div className="grid grid-cols-2 gap-2 mt-2">
+                      <div className="grid grid-cols-2 gap-2">
                         {moreAdapters.map((opt) => (
-                           <button
-                             key={opt.type}
-                             disabled={!!opt.comingSoon}
-                             className={cn(
-                               "flex flex-col items-center gap-1.5 rounded-md border p-3 text-xs transition-colors relative",
-                               opt.comingSoon
-                                 ? "border-border opacity-40 cursor-not-allowed"
-                                 : adapterType === opt.type
-                                 ? "border-foreground bg-accent"
-                                 : "border-border hover:bg-accent/50"
-                             )}
-                             onClick={() => {
-                               if (opt.comingSoon) return;
-                               const nextType = opt.type;
-                              setAdapterType(nextType);
-                              if (nextType === "gemini_local" && !model) {
-                                setModel(DEFAULT_GEMINI_LOCAL_MODEL);
-                                return;
-                              }
-                              if (nextType === "cursor" && !model) {
-                                setModel(DEFAULT_CURSOR_LOCAL_MODEL);
-                                return;
-                              }
-                              if (nextType === "opencode_local") {
-                                if (!model.includes("/")) {
-                                  setModel("");
-                                }
-                                return;
-                              }
-                              setModel("");
+                          <button
+                            key={opt.type}
+                            type="button"
+                            disabled={!!opt.comingSoon}
+                            className={cn(
+                              "flex flex-col items-center gap-1.5 rounded-md border p-3 text-xs transition-colors relative",
+                              opt.comingSoon
+                                ? "border-border opacity-40 cursor-not-allowed"
+                                : adapterType === opt.type
+                                  ? "border-foreground bg-accent"
+                                  : "border-border hover:bg-accent/50"
+                            )}
+                            onClick={() => {
+                              if (opt.comingSoon) return;
+                              handleAdapterSelect(opt.type);
                             }}
                           >
                             <opt.icon className="h-4 w-4" />
@@ -844,8 +962,7 @@ export function OnboardingWizard() {
                     )}
                   </div>
 
-                  {/* Conditional adapter fields */}
-                  {isLocalAdapter && (
+                  {(isCliAdapter || isApiAdapter) && (
                     <div className="space-y-3">
                       <div>
                         <label className="text-xs text-muted-foreground mb-1 block">
@@ -868,7 +985,7 @@ export function OnboardingWizard() {
                                 {selectedModel
                                   ? selectedModel.label
                                   : model ||
-                                    (adapterType === "opencode_local"
+                                    (adapterType === "opencode_local" || isApiAdapter
                                       ? "Select model (required)"
                                       : "Default")}
                               </span>
@@ -886,7 +1003,7 @@ export function OnboardingWizard() {
                               onChange={(e) => setModelSearch(e.target.value)}
                               autoFocus
                             />
-                            {adapterType !== "opencode_local" && (
+                            {adapterType !== "opencode_local" && !isApiAdapter && (
                               <button
                                 className={cn(
                                   "flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-accent/50",
@@ -938,16 +1055,94 @@ export function OnboardingWizard() {
                             </div>
                             {filteredModels.length === 0 && (
                               <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                                No models discovered.
+                                {isApiAdapter
+                                  ? "No models loaded yet."
+                                  : "No models discovered."}
                               </p>
                             )}
                           </PopoverContent>
                         </Popover>
                       </div>
+
+                      {isApiAdapter && (
+                        <>
+                          <div className="space-y-2 rounded-md border border-border p-3">
+                            <div>
+                              <p className="text-xs font-medium">API credentials</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                Use plain values or store the key in a company secret and reference it here.
+                              </p>
+                            </div>
+                            <EnvVarEditor
+                              value={envBindings}
+                              secrets={availableSecrets}
+                              onCreateSecret={async (name: string, value: string): Promise<CompanySecret> => {
+                                return createSecret.mutateAsync({ name, value });
+                              }}
+                              onChange={(env) => setEnvBindings(env ?? {})}
+                            />
+                          </div>
+
+                          {adapterType === "openai_compatible" && (
+                            <div className="space-y-3 rounded-md border border-border p-3">
+                              <div>
+                                <label className="text-xs text-muted-foreground mb-1 block">
+                                  Base URL
+                                </label>
+                                <input
+                                  className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                                  placeholder="https://host.example/v1"
+                                  value={baseUrl}
+                                  onChange={(e) => setBaseUrl(e.target.value)}
+                                />
+                              </div>
+                              <div>
+                                <label className="text-xs text-muted-foreground mb-1 block">
+                                  Static headers JSON (optional)
+                                </label>
+                                <textarea
+                                  className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50 min-h-[88px]"
+                                  placeholder='{"HTTP-Referer":"https://example.com"}'
+                                  value={headersJson}
+                                  onChange={(e) => setHeadersJson(e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-2 rounded-md border border-border p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div>
+                                <p className="text-xs font-medium">Provider model discovery</p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  Load the live model list using the current API credentials.
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2.5 text-xs"
+                                disabled={discoverApiModels.isPending || !createdCompanyId}
+                                onClick={() => void discoverApiModels.mutateAsync()}
+                              >
+                                {discoverApiModels.isPending ? "Loading..." : "Load models"}
+                              </Button>
+                            </div>
+                            {discoverApiModels.error && (
+                              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive">
+                                {discoverApiModels.error instanceof Error
+                                  ? discoverApiModels.error.message
+                                  : "Failed to load provider models."}
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 
-                  {isLocalAdapter && (
+                  {(isCliAdapter || isApiAdapter) && (
                     <div className="space-y-2 rounded-md border border-border p-3">
                       <div className="flex items-center justify-between gap-2">
                         <div>
@@ -955,8 +1150,9 @@ export function OnboardingWizard() {
                             Adapter environment check
                           </p>
                           <p className="text-[11px] text-muted-foreground">
-                            Runs a live probe that asks the adapter CLI to
-                            respond with hello.
+                            {isApiAdapter
+                              ? "Runs a live provider probe using the current adapter config."
+                              : "Runs a live probe that asks the adapter CLI to respond with hello."}
                           </p>
                         </div>
                         <Button
@@ -1010,7 +1206,7 @@ export function OnboardingWizard() {
                         </div>
                       )}
 
-                      {adapterEnvResult && adapterEnvResult.status === "fail" && (
+                      {adapterEnvResult && adapterEnvResult.status === "fail" && isCliAdapter && (
                         <div className="rounded-md border border-border/70 bg-muted/20 px-2.5 py-2 text-[11px] space-y-1.5">
                           <p className="font-medium">Manual debug</p>
                           <p className="text-muted-foreground font-mono break-all">

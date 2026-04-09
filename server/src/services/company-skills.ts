@@ -4,8 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { and, asc, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { companySkills } from "@paperclipai/db";
-import { readPaperclipSkillSyncPreference } from "@paperclipai/adapter-utils/server-utils";
+import { companies, companySkills } from "@paperclipai/db";
+import { readPaperclipSkillSyncPreference, writePaperclipSkillSyncPreference } from "@paperclipai/adapter-utils/server-utils";
 import type { PaperclipSkillEntry } from "@paperclipai/adapter-utils/server-utils";
 import type {
   CompanySkill,
@@ -1525,6 +1525,15 @@ export function companySkillService(db: Db) {
   const projects = projectService(db);
   const secretsSvc = secretService(db);
 
+  async function companyExists(companyId: string): Promise<boolean> {
+    const row = await db
+      .select({ id: companies.id })
+      .from(companies)
+      .where(eq(companies.id, companyId))
+      .then((rows) => rows[0] ?? null);
+    return Boolean(row);
+  }
+
   async function ensureBundledSkills(companyId: string) {
     for (const skillsRoot of resolveBundledSkillsRoot()) {
       const stats = await fs.stat(skillsRoot).catch(() => null);
@@ -1570,6 +1579,7 @@ export function companySkillService(db: Db) {
   }
 
   async function ensureSkillInventoryCurrent(companyId: string) {
+    if (!(await companyExists(companyId))) return;
     const existingRefresh = skillInventoryRefreshPromises.get(companyId);
     if (existingRefresh) {
       await existingRefresh;
@@ -1626,6 +1636,7 @@ export function companySkillService(db: Db) {
   }
 
   async function listFull(companyId: string): Promise<CompanySkill[]> {
+    if (!(await companyExists(companyId))) return [];
     await ensureSkillInventoryCurrent(companyId);
     const rows = await db
       .select()
@@ -2296,6 +2307,9 @@ export function companySkillService(db: Db) {
   }
 
   async function upsertImportedSkills(companyId: string, imported: ImportedSkill[]): Promise<CompanySkill[]> {
+    if (!(await companyExists(companyId))) {
+      throw notFound("Company not found");
+    }
     const out: CompanySkill[] = [];
     for (const skill of imported) {
       const existing = await getByKey(companyId, skill.key);

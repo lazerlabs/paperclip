@@ -83,8 +83,12 @@ export function agentRoutes(db: Db) {
     codex_local: "instructionsFilePath",
     droid_local: "instructionsFilePath",
     gemini_local: "instructionsFilePath",
+    gemini_api: "instructionsFilePath",
     hermes_local: "instructionsFilePath",
+    anthropic_api: "instructionsFilePath",
     opencode_local: "instructionsFilePath",
+    openai_api: "instructionsFilePath",
+    openai_compatible: "instructionsFilePath",
     cursor: "instructionsFilePath",
     pi_local: "instructionsFilePath",
   };
@@ -846,6 +850,35 @@ export function agentRoutes(db: Db) {
     const models = await listAdapterModels(type);
     res.json(models);
   });
+
+  router.post(
+    "/companies/:companyId/adapters/:type/models/discover",
+    validate(testAdapterEnvironmentSchema),
+    async (req, res) => {
+      const companyId = req.params.companyId as string;
+      const type = assertKnownAdapterType(req.params.type as string);
+      await assertCanReadConfigurations(req, companyId);
+
+      const inputAdapterConfig =
+        (req.body?.adapterConfig ?? {}) as Record<string, unknown>;
+      const normalizedAdapterConfig = await secretsSvc.normalizeAdapterConfigForPersistence(
+        companyId,
+        inputAdapterConfig,
+        { strictMode: strictSecretsMode },
+      );
+      const { config: runtimeAdapterConfig } = await secretsSvc.resolveAdapterConfigForRuntime(
+        companyId,
+        normalizedAdapterConfig,
+      );
+
+      const models = await listAdapterModels(type, {
+        companyId,
+        adapterType: type,
+        config: runtimeAdapterConfig,
+      });
+      res.json(models);
+    },
+  );
 
   router.get("/companies/:companyId/adapters/:type/detect-model", async (req, res) => {
     const companyId = req.params.companyId as string;

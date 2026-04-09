@@ -14,7 +14,18 @@ const joinAdapterOptions: AgentAdapterType[] = [...AGENT_ADAPTER_TYPES];
 
 import { getAdapterLabel } from "../adapters/adapter-display-registry";
 
-const ENABLED_INVITE_ADAPTERS = new Set(["claude_local", "codex_local", "gemini_local", "opencode_local", "pi_local", "cursor"]);
+const ENABLED_INVITE_ADAPTERS = new Set([
+  "claude_local",
+  "codex_local",
+  "gemini_local",
+  "opencode_local",
+  "pi_local",
+  "cursor",
+  "openai_api",
+  "anthropic_api",
+  "gemini_api",
+  "openai_compatible",
+]);
 
 function dateTime(value: string) {
   return new Date(value).toLocaleString();
