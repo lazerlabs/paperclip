@@ -79,17 +79,25 @@ describe("adapter model listing", () => {
       companyId: "company-1",
       adapterType: "openai_api",
       config: {
+        baseUrl: "https://proxy.example/v1",
+        organizationId: "org_test",
+        projectId: "proj_test",
         env: {
-          OPENAI_API_KEY: "sk-openai",
+          OPENAI_API_KEY: {
+            type: "plain",
+            value: "sk-openai",
+          },
         },
       },
     });
 
     expect(fetchSpy).toHaveBeenCalledWith(
-      "https://api.openai.com/v1/models",
+      "https://proxy.example/v1/models",
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer sk-openai",
+          "OpenAI-Organization": "org_test",
+          "OpenAI-Project": "proj_test",
         }),
       }),
     );

@@ -3,7 +3,11 @@ import type {
   AdapterEnvironmentTestContext,
   AdapterEnvironmentTestResult,
 } from "@paperclipai/adapter-utils";
-import { summarizeDetail, summarizeEnvironmentStatus } from "@paperclipai/adapter-utils/api-adapter-utils";
+import {
+  readResolvedEnvBindings,
+  summarizeDetail,
+  summarizeEnvironmentStatus,
+} from "@paperclipai/adapter-utils/api-adapter-utils";
 import { ensureAbsoluteDirectory, parseObject } from "@paperclipai/adapter-utils/server-utils";
 
 function readApiKey(env: Record<string, string>): string | null {
@@ -107,11 +111,7 @@ export async function testEnvironment(
     });
   }
 
-  const envConfig = parseObject(config.env);
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(envConfig)) {
-    if (typeof value === "string") env[key] = value;
-  }
+  const env = readResolvedEnvBindings(config.env);
 
   const apiKey = readApiKey(env);
   if (!apiKey) {

@@ -7,6 +7,8 @@ export const defaultCreateValues: CreateConfigValues = {
   promptTemplate: "",
   model: "",
   baseUrl: "",
+  organizationId: "",
+  projectId: "",
   headersJson: "",
   thinkingEffort: "",
   chrome: false,

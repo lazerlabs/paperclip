@@ -1,8 +1,8 @@
 import type { AdapterModel, AdapterModelDiscoveryContext } from "@paperclipai/adapter-utils";
-import { parseObject } from "@paperclipai/adapter-utils/server-utils";
+import { readResolvedEnvBindings } from "@paperclipai/adapter-utils/api-adapter-utils";
 
 function readApiKey(config: Record<string, unknown>): string | null {
-  const env = parseObject(config.env);
+  const env = readResolvedEnvBindings(config.env);
   const configValue = typeof env.GEMINI_API_KEY === "string" ? env.GEMINI_API_KEY.trim() : "";
   if (configValue) return configValue;
   const hostValue = typeof process.env.GEMINI_API_KEY === "string" ? process.env.GEMINI_API_KEY.trim() : "";

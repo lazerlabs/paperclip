@@ -50,6 +50,23 @@ export function summarizeDetail(value: string | null | undefined, max = 240): st
   return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 }
 
+export function readResolvedEnvBindings(envValue: unknown): Record<string, string> {
+  const envConfig = parseObject(envValue);
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(envConfig)) {
+    if (typeof value === "string") {
+      env[key] = value;
+      continue;
+    }
+    if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+    const record = value as Record<string, unknown>;
+    if (record.type === "plain" && typeof record.value === "string") {
+      env[key] = record.value;
+    }
+  }
+  return env;
+}
+
 export async function prepareApiAdapterRun(
   ctx: AdapterExecutionContext,
   options: {
@@ -62,11 +79,7 @@ export async function prepareApiAdapterRun(
   const cwd = asString(config.cwd, process.cwd());
   await ensureAbsoluteDirectory(cwd, { createIfMissing: true });
 
-  const envConfig = parseObject(config.env);
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(envConfig)) {
-    if (typeof value === "string") env[key] = value;
-  }
+  const env = readResolvedEnvBindings(config.env);
 
   const instructionsFilePath = asString(config.instructionsFilePath, "").trim();
   const resolvedInstructionsFilePath =

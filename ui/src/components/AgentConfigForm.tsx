@@ -379,6 +379,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     mark: mark as (group: "adapterConfig", field: string, value: unknown) => void,
     models,
     hideInstructionsFile,
+    availableSecrets,
+    onCreateSecret: async (name: string, value: string) => createSecret.mutateAsync({ name, value }),
   };
 
   // Section toggle state — advanced always starts collapsed
@@ -793,7 +795,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
               {isApiAdapter && (
                 <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
                   <p className="text-xs text-muted-foreground">
-                    Load the live provider model list using the current env bindings.
+                    Load the live provider model list using the current provider configuration.
                   </p>
                   <Button
                     type="button"
@@ -803,7 +805,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                     onClick={() => discoverApiModels.mutate()}
                     disabled={discoverApiModels.isPending || !selectedCompanyId}
                   >
-                    {discoverApiModels.isPending ? "Loading..." : "Refresh models"}
+                    {discoverApiModels.isPending ? "Loading..." : "Load models"}
                   </Button>
                 </div>
               )}
@@ -895,26 +897,28 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
               </Field>
               )}
 
-              <Field label="Environment variables" hint={help.envVars}>
-                <EnvVarEditor
-                  value={
-                    isCreate
-                      ? ((val!.envBindings ?? EMPTY_ENV) as Record<string, EnvBinding>)
-                      : ((eff("adapterConfig", "env", (config.env ?? EMPTY_ENV) as Record<string, EnvBinding>))
-                      )
-                  }
-                  secrets={availableSecrets}
-                  onCreateSecret={async (name, value) => {
-                    const created = await createSecret.mutateAsync({ name, value });
-                    return created;
-                  }}
-                  onChange={(env) =>
-                    isCreate
-                      ? set!({ envBindings: env ?? {}, envVars: "" })
-                      : mark("adapterConfig", "env", env)
-                  }
-                />
-              </Field>
+              {!isApiAdapter && (
+                <Field label="Environment variables" hint={help.envVars}>
+                  <EnvVarEditor
+                    value={
+                      isCreate
+                        ? ((val!.envBindings ?? EMPTY_ENV) as Record<string, EnvBinding>)
+                        : ((eff("adapterConfig", "env", (config.env ?? EMPTY_ENV) as Record<string, EnvBinding>))
+                        )
+                    }
+                    secrets={availableSecrets}
+                    onCreateSecret={async (name, value) => {
+                      const created = await createSecret.mutateAsync({ name, value });
+                      return created;
+                    }}
+                    onChange={(env) =>
+                      isCreate
+                        ? set!({ envBindings: env ?? {}, envVars: "" })
+                        : mark("adapterConfig", "env", env)
+                    }
+                  />
+                </Field>
+              )}
 
               {/* Edit-only: timeout + grace period */}
               {!isCreate && (

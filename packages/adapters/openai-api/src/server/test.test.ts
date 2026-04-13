@@ -35,11 +35,12 @@ describe("openai api adapter environment test", () => {
   });
 
   it("classifies authentication failures", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockResponse(401, JSON.stringify({ error: { message: "invalid api key" } })),
+    );
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        mockResponse(401, JSON.stringify({ error: { message: "invalid api key" } })),
-      ),
+      fetchMock,
     );
 
     const result = await testEnvironment({
@@ -48,12 +49,25 @@ describe("openai api adapter environment test", () => {
       config: {
         cwd: process.cwd(),
         model: "gpt-5",
+        baseUrl: "https://proxy.example/v1",
+        organizationId: "org_test",
+        projectId: "proj_test",
         env: {
-          OPENAI_API_KEY: "sk-test",
+          OPENAI_API_KEY: { type: "plain", value: "sk-test" },
         },
       },
     });
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://proxy.example/v1/responses",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: "Bearer sk-test",
+          "OpenAI-Organization": "org_test",
+          "OpenAI-Project": "proj_test",
+        }),
+      }),
+    );
     expect(result.status).toBe("fail");
     expect(result.checks).toEqual(
       expect.arrayContaining([

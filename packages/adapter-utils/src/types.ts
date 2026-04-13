@@ -405,6 +405,8 @@ export interface CreateConfigValues {
   promptTemplate: string;
   model: string;
   baseUrl?: string;
+  organizationId?: string;
+  projectId?: string;
   headersJson?: string;
   thinkingEffort: string;
   chrome: boolean;

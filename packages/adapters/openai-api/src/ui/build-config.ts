@@ -44,6 +44,9 @@ export function buildOpenAiApiConfig(v: CreateConfigValues): Record<string, unkn
   if (v.cwd) config.cwd = v.cwd;
   if (v.instructionsFilePath) config.instructionsFilePath = v.instructionsFilePath;
   if (v.promptTemplate) config.promptTemplate = v.promptTemplate;
+  if (v.baseUrl?.trim()) config.baseUrl = v.baseUrl.trim();
+  if (v.organizationId?.trim()) config.organizationId = v.organizationId.trim();
+  if (v.projectId?.trim()) config.projectId = v.projectId.trim();
   const env = parseEnvBindings(v.envBindings);
   for (const [key, value] of Object.entries(parseEnvVars(v.envVars))) {
     if (!(key in env)) env[key] = { type: "plain", value };

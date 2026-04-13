@@ -19,6 +19,9 @@ Core fields:
 - instructionsFilePath (string, optional): markdown instructions file appended to the provider prompt
 - promptTemplate (string, optional): heartbeat prompt template rendered by Paperclip
 - env (object, optional): adapter environment; use OPENAI_API_KEY for authentication
+- baseUrl (string, optional): alternate OpenAI-compatible API base URL
+- organizationId (string, optional): OpenAI organization override
+- projectId (string, optional): OpenAI project override
 - timeoutSec (number, optional): request timeout in seconds
 - graceSec (number, optional): retained for config parity; not used by in-process API calls
 

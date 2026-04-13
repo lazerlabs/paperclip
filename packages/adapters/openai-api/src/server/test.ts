@@ -5,6 +5,7 @@ import type {
 } from "@paperclipai/adapter-utils";
 import {
   firstNonEmptyLine,
+  readResolvedEnvBindings,
   summarizeDetail,
   summarizeEnvironmentStatus,
 } from "@paperclipai/adapter-utils/api-adapter-utils";
@@ -17,6 +18,26 @@ function readApiKey(env: Record<string, string>): string | null {
   }
   const hostValue = process.env.OPENAI_API_KEY;
   return typeof hostValue === "string" && hostValue.trim().length > 0 ? hostValue.trim() : null;
+}
+
+function readBaseUrl(config: Record<string, unknown>): string {
+  const value = typeof config.baseUrl === "string" ? config.baseUrl.trim() : "";
+  if (!value) return "https://api.openai.com/v1/";
+  try {
+    return new URL(value.endsWith("/") ? value : `${value}/`).toString();
+  } catch {
+    return "https://api.openai.com/v1/";
+  }
+}
+
+function readOrganization(config: Record<string, unknown>): string | null {
+  const value = typeof config.organizationId === "string" ? config.organizationId.trim() : "";
+  return value || null;
+}
+
+function readProject(config: Record<string, unknown>): string | null {
+  const value = typeof config.projectId === "string" ? config.projectId.trim() : "";
+  return value || null;
 }
 
 function classifyResponse(status: number, body: string): AdapterEnvironmentCheck {
@@ -88,11 +109,7 @@ export async function testEnvironment(
     });
   }
 
-  const envConfig = parseObject(config.env);
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(envConfig)) {
-    if (typeof value === "string") env[key] = value;
-  }
+  const env = readResolvedEnvBindings(config.env);
 
   const apiKey = readApiKey(env);
   if (!apiKey) {
@@ -117,11 +134,13 @@ export async function testEnvironment(
   const canProbe = checks.every((check) => check.level !== "error");
   if (canProbe) {
     try {
-      const response = await fetch("https://api.openai.com/v1/responses", {
+      const response = await fetch(new URL("responses", readBaseUrl(config)).toString(), {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
+          ...(readOrganization(config) ? { "OpenAI-Organization": readOrganization(config)! } : {}),
+          ...(readProject(config) ? { "OpenAI-Project": readProject(config)! } : {}),
         },
         body: JSON.stringify({
           model,

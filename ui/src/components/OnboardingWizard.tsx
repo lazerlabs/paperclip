@@ -48,7 +48,8 @@ import { DEFAULT_GEMINI_API_MODEL } from "@paperclipai/adapter-gemini-api";
 import { DEFAULT_OPENAI_COMPATIBLE_MODEL } from "@paperclipai/adapter-openai-compatible";
 import { resolveRouteOnboardingOptions } from "../lib/onboarding-route";
 import { AsciiArtAnimation } from "./AsciiArtAnimation";
-import { EnvVarEditor } from "./AgentConfigForm";
+import { CredentialBindingField } from "./CredentialBindingField";
+import { EnvVarEditor } from "./EnvVarEditor";
 import {
   Building2,
   Bot,
@@ -120,6 +121,8 @@ export function OnboardingWizard() {
   const [url, setUrl] = useState("");
   const [envBindings, setEnvBindings] = useState<Record<string, EnvBinding>>({});
   const [baseUrl, setBaseUrl] = useState("");
+  const [organizationId, setOrganizationId] = useState("");
+  const [projectId, setProjectId] = useState("");
   const [headersJson, setHeadersJson] = useState("");
   const [adapterEnvResult, setAdapterEnvResult] =
     useState<AdapterEnvironmentTestResult | null>(null);
@@ -284,12 +287,12 @@ export function OnboardingWizard() {
     if (step !== 2) return;
     setAdapterEnvResult(null);
     setAdapterEnvError(null);
-  }, [step, adapterType, model, command, args, url, envBindings, baseUrl, headersJson]);
+  }, [step, adapterType, model, command, args, url, envBindings, baseUrl, organizationId, projectId, headersJson]);
 
   useEffect(() => {
     if (!isApiAdapter) return;
     setDiscoveredApiModels(null);
-  }, [isApiAdapter, envBindings, baseUrl, headersJson]);
+  }, [isApiAdapter, envBindings, baseUrl, organizationId, projectId, headersJson]);
 
   const effectiveAdapterModels = discoveredApiModels ?? adapterModels ?? [];
   const selectedModel = effectiveAdapterModels.find((m) => m.id === model);
@@ -391,6 +394,8 @@ export function OnboardingWizard() {
     setUrl("");
     setEnvBindings({});
     setBaseUrl("");
+    setOrganizationId("");
+    setProjectId("");
     setHeadersJson("");
     setDiscoveredApiModels(null);
     setAdapterEnvResult(null);
@@ -439,6 +444,8 @@ export function OnboardingWizard() {
       url,
       envBindings,
       baseUrl,
+      organizationId,
+      projectId,
       headersJson,
       dangerouslySkipPermissions:
         adapterType === "claude_local" || adapterType === "opencode_local",
@@ -1070,24 +1077,41 @@ export function OnboardingWizard() {
                             <div>
                               <p className="text-xs font-medium">API credentials</p>
                               <p className="text-[11px] text-muted-foreground">
-                                Use plain values or store the key in a company secret and reference it here.
+                                Configure provider credentials directly here without editing environment variable names.
                               </p>
                             </div>
-                            <EnvVarEditor
-                              value={envBindings}
-                              secrets={availableSecrets}
-                              onCreateSecret={async (name: string, value: string): Promise<CompanySecret> => {
-                                return createSecret.mutateAsync({ name, value });
-                              }}
-                              onChange={(env) => setEnvBindings(env ?? {})}
-                            />
+                            {(() => {
+                              const envKey =
+                                adapterType === "anthropic_api"
+                                  ? "ANTHROPIC_API_KEY"
+                                  : adapterType === "gemini_api"
+                                    ? "GEMINI_API_KEY"
+                                    : "OPENAI_API_KEY";
+                              const currentBinding = envBindings[envKey];
+                              return (
+                                <CredentialBindingField
+                                  label={`${adapterType}-api-key`}
+                                  binding={currentBinding}
+                                  secrets={availableSecrets}
+                                  onCreateSecret={async (name: string, value: string): Promise<CompanySecret> =>
+                                    createSecret.mutateAsync({ name, value })}
+                                  onChange={(binding) => {
+                                    const nextEnv = { ...envBindings };
+                                    if (binding) nextEnv[envKey] = binding;
+                                    else delete nextEnv[envKey];
+                                    setEnvBindings(nextEnv);
+                                  }}
+                                  placeholder="sk-..."
+                                />
+                              );
+                            })()}
                           </div>
 
-                          {adapterType === "openai_compatible" && (
+                          {(adapterType === "openai_api" || adapterType === "openai_compatible") && (
                             <div className="space-y-3 rounded-md border border-border p-3">
                               <div>
                                 <label className="text-xs text-muted-foreground mb-1 block">
-                                  Base URL
+                                  Base URL {adapterType === "openai_api" ? "(optional)" : ""}
                                 </label>
                                 <input
                                   className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
@@ -1096,26 +1120,74 @@ export function OnboardingWizard() {
                                   onChange={(e) => setBaseUrl(e.target.value)}
                                 />
                               </div>
-                              <div>
-                                <label className="text-xs text-muted-foreground mb-1 block">
-                                  Static headers JSON (optional)
-                                </label>
-                                <textarea
-                                  className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50 min-h-[88px]"
-                                  placeholder='{"HTTP-Referer":"https://example.com"}'
-                                  value={headersJson}
-                                  onChange={(e) => setHeadersJson(e.target.value)}
-                                />
-                              </div>
+                              {adapterType === "openai_api" && (
+                                <>
+                                  <div>
+                                    <label className="text-xs text-muted-foreground mb-1 block">
+                                      Organization ID (optional)
+                                    </label>
+                                    <input
+                                      className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                                      placeholder="org-..."
+                                      value={organizationId}
+                                      onChange={(e) => setOrganizationId(e.target.value)}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="text-xs text-muted-foreground mb-1 block">
+                                      Project ID (optional, legacy)
+                                    </label>
+                                    <input
+                                      className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
+                                      placeholder="proj_..."
+                                      value={projectId}
+                                      onChange={(e) => setProjectId(e.target.value)}
+                                    />
+                                  </div>
+                                </>
+                              )}
+                              {adapterType === "openai_compatible" && (
+                                <div>
+                                  <label className="text-xs text-muted-foreground mb-1 block">
+                                    Static headers JSON (optional)
+                                  </label>
+                                  <textarea
+                                    className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50 min-h-[88px]"
+                                    placeholder='{"HTTP-Referer":"https://example.com"}'
+                                    value={headersJson}
+                                    onChange={(e) => setHeadersJson(e.target.value)}
+                                  />
+                                </div>
+                              )}
                             </div>
                           )}
+
+                          {adapterType !== "openai_api" &&
+                            adapterType !== "openai_compatible" && (
+                              <div className="space-y-2 rounded-md border border-border p-3">
+                                <div>
+                                  <p className="text-xs font-medium">Advanced environment variables</p>
+                                  <p className="text-[11px] text-muted-foreground">
+                                    Add provider-specific overrides only if you need more than the primary API key.
+                                  </p>
+                                </div>
+                                <EnvVarEditor
+                                  value={envBindings}
+                                  secrets={availableSecrets}
+                                  onCreateSecret={async (name: string, value: string): Promise<CompanySecret> => {
+                                    return createSecret.mutateAsync({ name, value });
+                                  }}
+                                  onChange={(env) => setEnvBindings(env ?? {})}
+                                />
+                              </div>
+                            )}
 
                           <div className="space-y-2 rounded-md border border-border p-3">
                             <div className="flex items-center justify-between gap-2">
                               <div>
                                 <p className="text-xs font-medium">Provider model discovery</p>
                                 <p className="text-[11px] text-muted-foreground">
-                                  Load the live model list using the current API credentials.
+                                  Load the live model list using the current provider configuration.
                                 </p>
                               </div>
                               <Button

@@ -16,6 +16,26 @@ function readApiKey(env: Record<string, string>): string | null {
   return typeof hostValue === "string" && hostValue.trim().length > 0 ? hostValue.trim() : null;
 }
 
+function readBaseUrl(config: Record<string, unknown>): string | null {
+  const value = typeof config.baseUrl === "string" ? config.baseUrl.trim() : "";
+  if (!value) return null;
+  try {
+    return new URL(value.endsWith("/") ? value : `${value}/`).toString();
+  } catch {
+    return null;
+  }
+}
+
+function readOrganization(config: Record<string, unknown>): string | null {
+  const value = typeof config.organizationId === "string" ? config.organizationId.trim() : "";
+  return value || null;
+}
+
+function readProject(config: Record<string, unknown>): string | null {
+  const value = typeof config.projectId === "string" ? config.projectId.trim() : "";
+  return value || null;
+}
+
 function responseTextFromResult(result: any): string {
   if (typeof result?.output_text === "string" && result.output_text.trim().length > 0) {
     return result.output_text.trim();
@@ -167,8 +187,14 @@ export async function execute(
 
   const sdk = await loadOpenAiSdk();
   const OpenAI = sdk.default ?? sdk.OpenAI;
+  const baseUrl = readBaseUrl(prepared.config);
+  const organization = readOrganization(prepared.config);
+  const project = readProject(prepared.config);
   const client = new OpenAI({
     apiKey,
+    ...(baseUrl ? { baseURL: baseUrl } : {}),
+    ...(organization ? { organization } : {}),
+    ...(project ? { project } : {}),
     ...(timeoutSec > 0 ? { timeout: timeoutSec * 1000 } : {}),
     maxRetries: 0,
   });
