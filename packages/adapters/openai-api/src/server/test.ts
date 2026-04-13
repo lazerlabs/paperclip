@@ -10,6 +10,7 @@ import {
   summarizeEnvironmentStatus,
 } from "@paperclipai/adapter-utils/api-adapter-utils";
 import { ensureAbsoluteDirectory, parseObject } from "@paperclipai/adapter-utils/server-utils";
+import { extractOpenAiResponseText } from "./response-text.js";
 
 function readApiKey(env: Record<string, string>): string | null {
   const configValue = env.OPENAI_API_KEY;
@@ -144,7 +145,7 @@ export async function testEnvironment(
         },
         body: JSON.stringify({
           model,
-          input: "Respond with hello.",
+          input: "Reply with exactly the single word: hello",
           max_output_tokens: 32,
         }),
       });
@@ -153,10 +154,7 @@ export async function testEnvironment(
         checks.push(classifyResponse(response.status, body));
       } else {
         const parsed = JSON.parse(body) as Record<string, unknown>;
-        const outputText =
-          typeof parsed.output_text === "string" && parsed.output_text.trim().length > 0
-            ? parsed.output_text.trim()
-            : firstNonEmptyLine(body);
+        const outputText = extractOpenAiResponseText(parsed) || firstNonEmptyLine(body);
         checks.push({
           code: /\bhello\b/i.test(outputText)
             ? "openai_api_probe_passed"

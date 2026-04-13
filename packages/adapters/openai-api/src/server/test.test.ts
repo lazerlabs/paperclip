@@ -140,4 +140,44 @@ describe("openai api adapter environment test", () => {
       ]),
     );
   });
+
+  it("treats structured responses output as a successful hello probe", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        mockResponse(
+          200,
+          JSON.stringify({
+            output: [
+              {
+                type: "message",
+                content: [{ type: "output_text", text: "hello" }],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+
+    const result = await testEnvironment({
+      companyId: "company-test",
+      adapterType: "openai_api",
+      config: {
+        cwd: process.cwd(),
+        model: "gpt-5",
+        env: {
+          OPENAI_API_KEY: "sk-test",
+        },
+      },
+    });
+
+    expect(result.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "openai_api_probe_passed",
+          level: "info",
+        }),
+      ]),
+    );
+  });
 });

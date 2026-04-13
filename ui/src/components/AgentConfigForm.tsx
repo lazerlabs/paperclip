@@ -55,6 +55,7 @@ import { getAdapterLabel } from "../adapters/adapter-display-registry";
 import { useDisabledAdaptersSync } from "../adapters/use-disabled-adapters";
 import { buildAgentUpdatePatch, type AgentConfigOverlay } from "../lib/agent-config-patch";
 import { useAdapterCapabilities } from "../adapters/use-adapter-capabilities";
+import { getApiAdapterMetadata } from "../lib/api-adapter-metadata";
 
 /* ---- Create mode values ---- */
 
@@ -62,6 +63,7 @@ import { useAdapterCapabilities } from "../adapters/use-adapter-capabilities";
 // so existing imports from this file keep working.
 export type { CreateConfigValues } from "@paperclipai/adapter-utils";
 import type { CreateConfigValues } from "@paperclipai/adapter-utils";
+export { EnvVarEditor } from "./EnvVarEditor";
 
 /* ---- Props ---- */
 
@@ -104,6 +106,14 @@ const emptyOverlay: AgentConfigOverlay = {
 
 /** Stable empty object used as fallback for missing env config to avoid new-object-per-render. */
 const EMPTY_ENV: Record<string, EnvBinding> = {};
+
+function hasUsableEnvBinding(binding: EnvBinding | undefined): boolean {
+  if (typeof binding === "string") return binding.trim().length > 0;
+  if (!binding || typeof binding !== "object") return false;
+  if (binding.type === "secret_ref") return typeof binding.secretId === "string" && binding.secretId.length > 0;
+  if (binding.type === "plain") return typeof binding.value === "string" && binding.value.trim().length > 0;
+  return false;
+}
 
 function isOverlayDirty(o: AgentConfigOverlay): boolean {
   return (
@@ -311,6 +321,18 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const currentHeaders = isCreate
     ? (props.values.headersJson ?? "")
     : JSON.stringify(eff("adapterConfig", "headers", config.headers ?? {}));
+  const apiAdapterMetadata = getApiAdapterMetadata(adapterType);
+  const currentApiCredentialBinding =
+    apiAdapterMetadata !== null
+      ? currentEnvConfig[apiAdapterMetadata.credentialKey]
+      : undefined;
+  const hasRequiredApiCredential =
+    !isApiAdapter ||
+    (apiAdapterMetadata !== null && hasUsableEnvBinding(currentApiCredentialBinding));
+  const hasRequiredApiDiscoveryConfig =
+    !isApiAdapter ||
+    (hasRequiredApiCredential &&
+      (adapterType !== "openai_compatible" || currentBaseUrl.trim().length > 0));
 
   // Fetch adapter models for the effective adapter type
   const {
@@ -321,7 +343,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       ? queryKeys.agents.adapterModels(selectedCompanyId, adapterType)
       : ["agents", "none", "adapter-models", adapterType],
     queryFn: () => agentsApi.adapterModels(selectedCompanyId!, adapterType),
-    enabled: Boolean(selectedCompanyId),
+    enabled: Boolean(selectedCompanyId) && !isApiAdapter,
   });
   const [discoveredApiModels, setDiscoveredApiModels] = useState<AdapterModel[] | null>(null);
   useEffect(() => {
@@ -342,7 +364,9 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       setDiscoveredApiModels(nextModels);
     },
   });
-  const models = discoveredApiModels ?? fetchedModels ?? externalModels ?? [];
+  const models = isApiAdapter
+    ? (discoveredApiModels ?? [])
+    : fetchedModels ?? externalModels ?? [];
   const {
     data: detectedModelData,
     refetch: refetchDetectedModel,
@@ -793,21 +817,34 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                 }
               />
               {isApiAdapter && (
-                <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
-                  <p className="text-xs text-muted-foreground">
-                    Load the live provider model list using the current provider configuration.
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2.5 text-xs shrink-0"
-                    onClick={() => discoverApiModels.mutate()}
-                    disabled={discoverApiModels.isPending || !selectedCompanyId}
-                  >
-                    {discoverApiModels.isPending ? "Loading..." : "Load models"}
-                  </Button>
-                </div>
+                <>
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">
+                      {apiAdapterMetadata?.discoveryHint ?? "Load the live provider model list using the current provider configuration."}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2.5 text-xs shrink-0"
+                      onClick={() => discoverApiModels.mutate()}
+                      disabled={
+                        discoverApiModels.isPending ||
+                        !selectedCompanyId ||
+                        !hasRequiredApiDiscoveryConfig
+                      }
+                    >
+                      {discoverApiModels.isPending ? "Loading..." : "Load models"}
+                    </Button>
+                  </div>
+                  {!hasRequiredApiDiscoveryConfig && apiAdapterMetadata && (
+                    <p className="text-xs text-muted-foreground">
+                      {adapterType === "openai_compatible"
+                        ? "Enter a bearer API key and a Base URL to load live models. Use a URL that includes /v1 when your provider expects it."
+                        : `Enter a valid ${apiAdapterMetadata.credentialLabel.toLowerCase()} to load live models.`}
+                    </p>
+                  )}
+                </>
               )}
               {fetchedModelsError && (
                 <p className="text-xs text-destructive">
@@ -919,6 +956,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   />
                 </Field>
               )}
+
 
               {/* Edit-only: timeout + grace period */}
               {!isCreate && (

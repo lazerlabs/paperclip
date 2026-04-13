@@ -59,11 +59,17 @@ export function EnvVarEditor({
   secrets,
   onCreateSecret,
   onChange,
+  fixedKey,
+  keyPlaceholder = "KEY",
+  valuePlaceholder = "value",
 }: {
   value: Record<string, EnvBinding>;
   secrets: CompanySecret[];
   onCreateSecret: (name: string, value: string) => Promise<CompanySecret>;
   onChange: (env: Record<string, EnvBinding> | undefined) => void;
+  fixedKey?: string;
+  keyPlaceholder?: string;
+  valuePlaceholder?: string;
 }) {
   const [rows, setRows] = useState<Row[]>(() => toRows(value));
   const [sealError, setSealError] = useState<string | null>(null);
@@ -85,7 +91,7 @@ export function EnvVarEditor({
   function emit(nextRows: Row[]) {
     const rec: Record<string, EnvBinding> = {};
     for (const row of nextRows) {
-      const key = row.key.trim();
+      const key = (fixedKey ?? row.key).trim();
       if (!key) continue;
       if (row.source === "secret") {
         if (row.secretId) {
@@ -102,13 +108,15 @@ export function EnvVarEditor({
   }
 
   function updateRow(index: number, patch: Partial<Row>) {
-    const withPatch = rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row));
+    const withPatch = rows.map((row, rowIndex) =>
+      rowIndex === index ? { ...row, ...(fixedKey ? { key: fixedKey } : {}), ...patch } : row,
+    );
     if (
-      withPatch[withPatch.length - 1].key ||
+      (!fixedKey && withPatch[withPatch.length - 1].key) ||
       withPatch[withPatch.length - 1].plainValue ||
       withPatch[withPatch.length - 1].secretId
     ) {
-      withPatch.push({ key: "", source: "plain", plainValue: "", secretId: "" });
+      withPatch.push({ key: fixedKey ?? "", source: "plain", plainValue: "", secretId: "" });
     }
     setRows(withPatch);
     emit(withPatch);
@@ -118,11 +126,11 @@ export function EnvVarEditor({
     const next = rows.filter((_, rowIndex) => rowIndex !== index);
     if (
       next.length === 0 ||
-      next[next.length - 1].key ||
+      (!fixedKey && next[next.length - 1].key) ||
       next[next.length - 1].plainValue ||
       next[next.length - 1].secretId
     ) {
-      next.push({ key: "", source: "plain", plainValue: "", secretId: "" });
+      next.push({ key: fixedKey ?? "", source: "plain", plainValue: "", secretId: "" });
     }
     setRows(next);
     emit(next);
@@ -140,7 +148,7 @@ export function EnvVarEditor({
   async function sealRow(index: number) {
     const row = rows[index];
     if (!row) return;
-    const key = row.key.trim();
+    const key = (fixedKey ?? row.key).trim();
     const plain = row.plainValue;
     if (!key || plain.length === 0) return;
 
@@ -162,17 +170,23 @@ export function EnvVarEditor({
       {rows.map((row, index) => {
         const isTrailing =
           index === rows.length - 1 &&
-          !row.key &&
+          !(fixedKey ?? row.key) &&
           !row.plainValue &&
           !row.secretId;
         return (
           <div key={index} className="flex items-center gap-1.5">
-            <input
-              className={cn(inputClass, "flex-[2]")}
-              placeholder="KEY"
-              value={row.key}
-              onChange={(event) => updateRow(index, { key: event.target.value })}
-            />
+            {fixedKey ? (
+              <div className={cn(inputClass, "flex-[2] flex items-center bg-muted/20 text-muted-foreground")}>
+                {fixedKey}
+              </div>
+            ) : (
+              <input
+                className={cn(inputClass, "flex-[2]")}
+                placeholder={keyPlaceholder}
+                value={row.key}
+                onChange={(event) => updateRow(index, { key: event.target.value })}
+              />
+            )}
             <select
               className={cn(inputClass, "flex-[1] bg-background")}
               value={row.source}
@@ -204,7 +218,7 @@ export function EnvVarEditor({
                   type="button"
                   className="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent/50 transition-colors shrink-0"
                   onClick={() => sealRow(index)}
-                  disabled={!row.key.trim() || !row.plainValue}
+                  disabled={!(fixedKey ?? row.key).trim() || !row.plainValue}
                   title="Create secret from current plain value"
                 >
                   New
@@ -214,7 +228,7 @@ export function EnvVarEditor({
               <>
                 <input
                   className={cn(inputClass, "flex-[3]")}
-                  placeholder="value"
+                  placeholder={valuePlaceholder}
                   value={row.plainValue}
                   onChange={(event) => updateRow(index, { plainValue: event.target.value })}
                 />
@@ -222,14 +236,14 @@ export function EnvVarEditor({
                   type="button"
                   className="inline-flex items-center rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent/50 transition-colors shrink-0"
                   onClick={() => sealRow(index)}
-                  disabled={!row.key.trim() || !row.plainValue}
+                  disabled={!(fixedKey ?? row.key).trim() || !row.plainValue}
                   title="Store value as secret and replace with reference"
                 >
                   Seal
                 </button>
               </>
             )}
-            {!isTrailing ? (
+            {!fixedKey && !isTrailing ? (
               <button
                 type="button"
                 className="shrink-0 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"

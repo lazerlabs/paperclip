@@ -24,12 +24,22 @@ function sortAndDedupe(models: AdapterModel[]): AdapterModel[] {
 export async function listModels(ctx?: AdapterModelDiscoveryContext): Promise<AdapterModel[]> {
   const config = parseObject(ctx?.config);
   const apiKey = readApiKey(config);
-  if (!apiKey) return [];
+  if (!apiKey) {
+    if (ctx?.config) {
+      throw new Error("GEMINI_API_KEY is required to load Gemini models.");
+    }
+    return [];
+  }
 
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`,
   );
-  if (!response.ok) return [];
+  if (!response.ok) {
+    if (ctx?.config) {
+      throw new Error(`Gemini model discovery failed with status ${response.status}.`);
+    }
+    return [];
+  }
 
   const payload = await response.json().catch(() => null) as
     | {

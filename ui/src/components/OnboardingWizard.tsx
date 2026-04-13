@@ -47,6 +47,7 @@ import { DEFAULT_ANTHROPIC_API_MODEL } from "@paperclipai/adapter-anthropic-api"
 import { DEFAULT_GEMINI_API_MODEL } from "@paperclipai/adapter-gemini-api";
 import { DEFAULT_OPENAI_COMPATIBLE_MODEL } from "@paperclipai/adapter-openai-compatible";
 import { resolveRouteOnboardingOptions } from "../lib/onboarding-route";
+import { getApiAdapterMetadata } from "../lib/api-adapter-metadata";
 import { AsciiArtAnimation } from "./AsciiArtAnimation";
 import { CredentialBindingField } from "./CredentialBindingField";
 import { EnvVarEditor } from "./EnvVarEditor";
@@ -66,6 +67,14 @@ import {
 
 type Step = 1 | 2 | 3 | 4;
 type AdapterType = string;
+
+function hasUsableEnvBinding(binding: EnvBinding | undefined): boolean {
+  if (typeof binding === "string") return binding.trim().length > 0;
+  if (!binding || typeof binding !== "object") return false;
+  if (binding.type === "secret_ref") return typeof binding.secretId === "string" && binding.secretId.length > 0;
+  if (binding.type === "plain") return typeof binding.value === "string" && binding.value.trim().length > 0;
+  return false;
+}
 
 const DEFAULT_TASK_DESCRIPTION = `You are the CEO. You set the direction for the company.
 
@@ -209,7 +218,11 @@ export function OnboardingWizard() {
       ? queryKeys.agents.adapterModels(createdCompanyId, adapterType)
       : ["agents", "none", "adapter-models", adapterType],
     queryFn: () => agentsApi.adapterModels(createdCompanyId!, adapterType),
-    enabled: Boolean(createdCompanyId) && effectiveOnboardingOpen && step === 2
+    enabled:
+      Boolean(createdCompanyId) &&
+      effectiveOnboardingOpen &&
+      step === 2 &&
+      !["openai_api", "anthropic_api", "gemini_api", "openai_compatible"].includes(adapterType)
   });
   const getCapabilities = useAdapterCapabilities();
   const adapterCaps = getCapabilities(adapterType);
@@ -233,7 +246,7 @@ export function OnboardingWizard() {
   const discoverApiModels = useMutation({
     mutationFn: async () => {
       if (!createdCompanyId) {
-        throw new Error(`Create or select a ${onboardingTerms.singular} before loading adapter models.`);
+        throw new Error("Create or select a company before loading adapter models.");
       }
       return agentsApi.adapterModels(createdCompanyId, adapterType, buildAdapterConfig());
     },
@@ -247,6 +260,18 @@ export function OnboardingWizard() {
     || adapterType === "anthropic_api"
     || adapterType === "gemini_api"
     || adapterType === "openai_compatible";
+  const apiAdapterMetadata = getApiAdapterMetadata(adapterType);
+  const currentApiCredentialBinding =
+    apiAdapterMetadata !== null
+      ? envBindings[apiAdapterMetadata.credentialKey]
+      : undefined;
+  const hasRequiredApiCredential =
+    !isApiAdapter ||
+    (apiAdapterMetadata !== null && hasUsableEnvBinding(currentApiCredentialBinding));
+  const hasRequiredApiDiscoveryConfig =
+    !isApiAdapter ||
+    (hasRequiredApiCredential &&
+      (adapterType !== "openai_compatible" || baseUrl.trim().length > 0));
   const isCliAdapter = adapterType === "claude_local"
     || adapterType === "codex_local"
     || adapterType === "cursor"
@@ -294,7 +319,9 @@ export function OnboardingWizard() {
     setDiscoveredApiModels(null);
   }, [isApiAdapter, envBindings, baseUrl, organizationId, projectId, headersJson]);
 
-  const effectiveAdapterModels = discoveredApiModels ?? adapterModels ?? [];
+  const effectiveAdapterModels = isApiAdapter
+    ? (discoveredApiModels ?? [])
+    : adapterModels ?? [];
   const selectedModel = effectiveAdapterModels.find((m) => m.id === model);
   const hasAnthropicApiKeyOverrideCheck =
     adapterEnvResult?.checks.some(
@@ -1081,12 +1108,7 @@ export function OnboardingWizard() {
                               </p>
                             </div>
                             {(() => {
-                              const envKey =
-                                adapterType === "anthropic_api"
-                                  ? "ANTHROPIC_API_KEY"
-                                  : adapterType === "gemini_api"
-                                    ? "GEMINI_API_KEY"
-                                    : "OPENAI_API_KEY";
+                              const envKey = apiAdapterMetadata?.credentialKey ?? "OPENAI_API_KEY";
                               const currentBinding = envBindings[envKey];
                               return (
                                 <CredentialBindingField
@@ -1101,7 +1123,7 @@ export function OnboardingWizard() {
                                     else delete nextEnv[envKey];
                                     setEnvBindings(nextEnv);
                                   }}
-                                  placeholder="sk-..."
+                                  placeholder={apiAdapterMetadata?.valuePlaceholder ?? "sk-..."}
                                 />
                               );
                             })()}
@@ -1115,7 +1137,7 @@ export function OnboardingWizard() {
                                 </label>
                                 <input
                                   className="w-full rounded-md border border-border bg-transparent px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground/50"
-                                  placeholder="https://host.example/v1"
+                                  placeholder="http://host:port/v1"
                                   value={baseUrl}
                                   onChange={(e) => setBaseUrl(e.target.value)}
                                 />
@@ -1187,7 +1209,7 @@ export function OnboardingWizard() {
                               <div>
                                 <p className="text-xs font-medium">Provider model discovery</p>
                                 <p className="text-[11px] text-muted-foreground">
-                                  Load the live model list using the current provider configuration.
+                                  {apiAdapterMetadata?.discoveryHint ?? "Load the live model list using the current provider configuration."}
                                 </p>
                               </div>
                               <Button
@@ -1195,12 +1217,23 @@ export function OnboardingWizard() {
                                 size="sm"
                                 variant="outline"
                                 className="h-7 px-2.5 text-xs"
-                                disabled={discoverApiModels.isPending || !createdCompanyId}
+                                disabled={
+                                  discoverApiModels.isPending ||
+                                  !createdCompanyId ||
+                                  !hasRequiredApiDiscoveryConfig
+                                }
                                 onClick={() => void discoverApiModels.mutateAsync()}
                               >
                                 {discoverApiModels.isPending ? "Loading..." : "Load models"}
                               </Button>
                             </div>
+                            {!hasRequiredApiDiscoveryConfig && apiAdapterMetadata && (
+                              <p className="text-[11px] text-muted-foreground">
+                                {adapterType === "openai_compatible"
+                                  ? "Enter a bearer API key and a Base URL to load live models. Include /v1 when your provider expects it."
+                                  : `Enter a valid ${apiAdapterMetadata.credentialLabel.toLowerCase()} to load live models.`}
+                              </p>
+                            )}
                             {discoverApiModels.error && (
                               <div className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-[11px] text-destructive">
                                 {discoverApiModels.error instanceof Error

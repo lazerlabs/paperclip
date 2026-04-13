@@ -156,4 +156,46 @@ describe("openai api adapter helpers", () => {
       },
     });
   });
+
+  it("extracts assistant text from structured response content", async () => {
+    const responsesCreate = vi.fn().mockResolvedValue({
+      id: "resp_structured",
+      output: [
+        {
+          type: "message",
+          content: [{ type: "output_text", text: "progress update" }],
+        },
+      ],
+      usage: {
+        input_tokens: 8,
+        output_tokens: 4,
+      },
+    });
+
+    class MockOpenAI {
+      responses = {
+        create: responsesCreate,
+      };
+    }
+
+    vi.mocked(loadOpenAiSdk).mockResolvedValue({
+      default: MockOpenAI,
+    });
+
+    const logs: Array<{ stream: string; chunk: string }> = [];
+    const result = await execute(
+      createExecutionContext({
+        onLog: async (stream, chunk) => {
+          logs.push({ stream, chunk });
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      exitCode: 0,
+      summary: "progress update",
+      sessionId: "resp_structured",
+    });
+    expect(logs.some((entry) => entry.chunk.includes("progress update"))).toBe(true);
+  });
 });

@@ -49,7 +49,18 @@ export async function listModels(ctx?: AdapterModelDiscoveryContext): Promise<Ad
   const config = parseObject(ctx?.config);
   const apiKey = readApiKey(config);
   const baseUrl = readBaseUrl(config);
-  if (!apiKey || !baseUrl) return [];
+  if (!apiKey) {
+    if (ctx?.config) {
+      throw new Error("OPENAI_API_KEY is required to load models from an OpenAI-compatible endpoint.");
+    }
+    return [];
+  }
+  if (!baseUrl) {
+    if (ctx?.config) {
+      throw new Error("A valid Base URL is required to load models from an OpenAI-compatible endpoint.");
+    }
+    return [];
+  }
 
   const endpoint = new URL("models", baseUrl).toString();
   const response = await fetch(endpoint, {
@@ -58,7 +69,14 @@ export async function listModels(ctx?: AdapterModelDiscoveryContext): Promise<Ad
       ...readStaticHeaders(config),
     },
   });
-  if (!response.ok) return [];
+  if (!response.ok) {
+    if (ctx?.config) {
+      throw new Error(
+        `OpenAI-compatible model discovery failed with status ${response.status}. Check the Base URL and include /v1 when your provider expects it.`,
+      );
+    }
+    return [];
+  }
 
   const payload = await response.json().catch(() => null) as
     | { data?: Array<{ id?: string }> }

@@ -24,7 +24,12 @@ function sortAndDedupe(models: AdapterModel[]): AdapterModel[] {
 export async function listModels(ctx?: AdapterModelDiscoveryContext): Promise<AdapterModel[]> {
   const config = parseObject(ctx?.config);
   const apiKey = readApiKey(config);
-  if (!apiKey) return [];
+  if (!apiKey) {
+    if (ctx?.config) {
+      throw new Error("ANTHROPIC_API_KEY is required to load Anthropic models.");
+    }
+    return [];
+  }
 
   const response = await fetch("https://api.anthropic.com/v1/models", {
     headers: {
@@ -32,7 +37,12 @@ export async function listModels(ctx?: AdapterModelDiscoveryContext): Promise<Ad
       "anthropic-version": "2023-06-01",
     },
   });
-  if (!response.ok) return [];
+  if (!response.ok) {
+    if (ctx?.config) {
+      throw new Error(`Anthropic model discovery failed with status ${response.status}.`);
+    }
+    return [];
+  }
 
   const payload = await response.json().catch(() => null) as
     | { data?: Array<{ id?: string; display_name?: string; displayName?: string }> }

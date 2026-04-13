@@ -5,6 +5,7 @@ import {
 } from "@paperclipai/adapter-utils/api-adapter-utils";
 import { parseObject } from "@paperclipai/adapter-utils/server-utils";
 import { DEFAULT_OPENAI_API_PROMPT_TEMPLATE } from "../index.js";
+import { extractOpenAiResponseText } from "./response-text.js";
 import { loadOpenAiSdk } from "./sdk.js";
 
 function readApiKey(env: Record<string, string>): string | null {
@@ -34,23 +35,6 @@ function readOrganization(config: Record<string, unknown>): string | null {
 function readProject(config: Record<string, unknown>): string | null {
   const value = typeof config.projectId === "string" ? config.projectId.trim() : "";
   return value || null;
-}
-
-function responseTextFromResult(result: any): string {
-  if (typeof result?.output_text === "string" && result.output_text.trim().length > 0) {
-    return result.output_text.trim();
-  }
-  const output = Array.isArray(result?.output) ? result.output : [];
-  const chunks: string[] = [];
-  for (const item of output) {
-    const contents = Array.isArray(item?.content) ? item.content : [];
-    for (const entry of contents) {
-      if (entry?.type === "output_text" && typeof entry.text === "string") {
-        chunks.push(entry.text);
-      }
-    }
-  }
-  return chunks.join("\n").trim();
 }
 
 function usageFromResult(result: any) {
@@ -265,7 +249,7 @@ export async function execute(
     }
   }
 
-  const outputText = responseTextFromResult(response);
+  const outputText = extractOpenAiResponseText(response);
   if (outputText) {
     await onLog("stdout", outputText.endsWith("\n") ? outputText : `${outputText}\n`);
   }
@@ -322,7 +306,7 @@ export function mapOpenAiApiResponse(result: any) {
         ? result.model.trim()
         : null,
     usage: usageFromResult(result),
-    summary: responseTextFromResult(result) || null,
+    summary: extractOpenAiResponseText(result) || null,
     sessionParams: savedResponseId ? { responseId: savedResponseId, sessionId: savedResponseId } : null,
     sessionDisplayId: savedResponseId,
   };

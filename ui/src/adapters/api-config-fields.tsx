@@ -12,6 +12,8 @@ const inputClass =
   "w-full rounded-md border border-border px-2.5 py-1.5 bg-transparent outline-none text-sm font-mono placeholder:text-muted-foreground/40";
 const instructionsFileHint =
   "Absolute path to a markdown file (for example AGENTS.md) that Paperclip prepends to the provider prompt at runtime.";
+const openAiCompatibleBaseUrlHint =
+  "Base API URL for the compatible endpoint. Include the provider path segment when required, for example https://host.example/v1.";
 
 function formatHeaders(value: unknown): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
@@ -154,7 +156,7 @@ export function ApiAdapterConfigFields({
 
       {(isOpenAiApi || isOpenAiCompatible) && (
         <>
-          <Field label="Base URL" hint={help.baseUrl}>
+          <Field label="Base URL" hint={openAiCompatibleBaseUrlHint}>
             <DraftInput
               value={
                 isCreate
@@ -168,7 +170,7 @@ export function ApiAdapterConfigFields({
               }
               immediate
               className={inputClass}
-              placeholder="https://host.example/v1"
+              placeholder="http://host:port/v1"
             />
           </Field>
         </>
