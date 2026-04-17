@@ -29,6 +29,13 @@ const externalAdapter: ServerAdapterModule = {
 };
 
 describe("server adapter registry", () => {
+  it("registers new built-in SDK-backed adapters", () => {
+    expect(findServerAdapter("openai_api")).not.toBeNull();
+    expect(findServerAdapter("anthropic_api")).not.toBeNull();
+    expect(findServerAdapter("gemini_api")).not.toBeNull();
+    expect(findServerAdapter("openai_compatible")).not.toBeNull();
+  });
+
   beforeEach(() => {
     unregisterServerAdapter("external_test");
     unregisterServerAdapter("claude_local");
@@ -93,6 +100,51 @@ describe("server adapter registry", () => {
     expect(resolved.models).toEqual([
       { id: "plugin-model", label: "Plugin Override" },
     ]);
+  });
+
+  it("exposes capability flags from registered adapters", () => {
+    const adapterWithCaps: ServerAdapterModule = {
+      type: "external_test",
+      execute: async () => ({ exitCode: 0, signal: null, timedOut: false }),
+      testEnvironment: async () => ({
+        adapterType: "external_test",
+        status: "pass" as const,
+        checks: [],
+        testedAt: new Date(0).toISOString(),
+      }),
+      supportsLocalAgentJwt: true,
+      supportsInstructionsBundle: true,
+      instructionsPathKey: "customPathKey",
+      requiresMaterializedRuntimeSkills: true,
+    };
+
+    registerServerAdapter(adapterWithCaps);
+
+    const resolved = findActiveServerAdapter("external_test");
+    expect(resolved).not.toBeNull();
+    expect(resolved!.supportsInstructionsBundle).toBe(true);
+    expect(resolved!.instructionsPathKey).toBe("customPathKey");
+    expect(resolved!.requiresMaterializedRuntimeSkills).toBe(true);
+    expect(resolved!.supportsLocalAgentJwt).toBe(true);
+  });
+
+  it("returns undefined for capability flags on adapters that do not set them", () => {
+    registerServerAdapter(externalAdapter);
+
+    const resolved = findActiveServerAdapter("external_test");
+    expect(resolved).not.toBeNull();
+    expect(resolved!.supportsInstructionsBundle).toBeUndefined();
+    expect(resolved!.instructionsPathKey).toBeUndefined();
+    expect(resolved!.requiresMaterializedRuntimeSkills).toBeUndefined();
+  });
+
+  it("built-in claude_local adapter declares capability flags", () => {
+    const adapter = findActiveServerAdapter("claude_local");
+    expect(adapter).not.toBeNull();
+    expect(adapter!.supportsInstructionsBundle).toBe(true);
+    expect(adapter!.instructionsPathKey).toBe("instructionsFilePath");
+    expect(adapter!.requiresMaterializedRuntimeSkills).toBe(false);
+    expect(adapter!.supportsLocalAgentJwt).toBe(true);
   });
 
   it("switches active adapter behavior back to the builtin when an override is paused", async () => {

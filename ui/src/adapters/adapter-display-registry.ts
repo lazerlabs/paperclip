@@ -64,10 +64,30 @@ const adapterDisplayMap: Record<string, AdapterDisplayInfo> = {
     icon: Code,
     recommended: true,
   },
+  openai_api: {
+    label: "OpenAI API",
+    description: "Hosted OpenAI agent",
+    icon: Sparkles,
+  },
+  anthropic_api: {
+    label: "Anthropic API",
+    description: "Hosted Claude agent",
+    icon: Bot,
+  },
   gemini_local: {
     label: "Gemini CLI",
     description: "Local Gemini agent",
     icon: Gem,
+  },
+  gemini_api: {
+    label: "Gemini API",
+    description: "Hosted Gemini agent",
+    icon: Gem,
+  },
+  openai_compatible: {
+    label: "OpenAI Compatible",
+    description: "OpenAI-style local or third-party endpoint",
+    icon: Cpu,
   },
   opencode_local: {
     label: "OpenCode",

@@ -14,8 +14,12 @@ import {
   DEFAULT_CODEX_LOCAL_BYPASS_APPROVALS_AND_SANDBOX,
   DEFAULT_CODEX_LOCAL_MODEL,
 } from "@paperclipai/adapter-codex-local";
+import { DEFAULT_OPENAI_API_MODEL } from "@paperclipai/adapter-openai-api";
+import { DEFAULT_ANTHROPIC_API_MODEL } from "@paperclipai/adapter-anthropic-api";
 import { DEFAULT_CURSOR_LOCAL_MODEL } from "@paperclipai/adapter-cursor-local";
+import { DEFAULT_GEMINI_API_MODEL } from "@paperclipai/adapter-gemini-api";
 import { DEFAULT_GEMINI_LOCAL_MODEL } from "@paperclipai/adapter-gemini-local";
+import { DEFAULT_OPENAI_COMPATIBLE_MODEL } from "@paperclipai/adapter-openai-compatible";
 import {
   Popover,
   PopoverContent,
@@ -49,6 +53,9 @@ import { shouldShowLegacyWorkingDirectoryField } from "../lib/legacy-agent-confi
 import { listAdapterOptions, listVisibleAdapterTypes } from "../adapters/metadata";
 import { getAdapterLabel } from "../adapters/adapter-display-registry";
 import { useDisabledAdaptersSync } from "../adapters/use-disabled-adapters";
+import { buildAgentUpdatePatch, type AgentConfigOverlay } from "../lib/agent-config-patch";
+import { useAdapterCapabilities } from "../adapters/use-adapter-capabilities";
+import { getApiAdapterMetadata } from "../lib/api-adapter-metadata";
 
 /* ---- Create mode values ---- */
 
@@ -56,6 +63,7 @@ import { useDisabledAdaptersSync } from "../adapters/use-disabled-adapters";
 // so existing imports from this file keep working.
 export type { CreateConfigValues } from "@paperclipai/adapter-utils";
 import type { CreateConfigValues } from "@paperclipai/adapter-utils";
+export { EnvVarEditor } from "./EnvVarEditor";
 
 /* ---- Props ---- */
 
@@ -89,15 +97,7 @@ type AgentConfigFormProps = {
 
 /* ---- Edit mode overlay (dirty tracking) ---- */
 
-interface Overlay {
-  identity: Record<string, unknown>;
-  adapterType?: string;
-  adapterConfig: Record<string, unknown>;
-  heartbeat: Record<string, unknown>;
-  runtime: Record<string, unknown>;
-}
-
-const emptyOverlay: Overlay = {
+const emptyOverlay: AgentConfigOverlay = {
   identity: {},
   adapterConfig: {},
   heartbeat: {},
@@ -107,7 +107,15 @@ const emptyOverlay: Overlay = {
 /** Stable empty object used as fallback for missing env config to avoid new-object-per-render. */
 const EMPTY_ENV: Record<string, EnvBinding> = {};
 
-function isOverlayDirty(o: Overlay): boolean {
+function hasUsableEnvBinding(binding: EnvBinding | undefined): boolean {
+  if (typeof binding === "string") return binding.trim().length > 0;
+  if (!binding || typeof binding !== "object") return false;
+  if (binding.type === "secret_ref") return typeof binding.secretId === "string" && binding.secretId.length > 0;
+  if (binding.type === "plain") return typeof binding.value === "string" && binding.value.trim().length > 0;
+  return false;
+}
+
+function isOverlayDirty(o: AgentConfigOverlay): boolean {
   return (
     Object.keys(o.identity).length > 0 ||
     o.adapterType !== undefined ||
@@ -169,6 +177,24 @@ const claudeThinkingEffortOptions = [
   { id: "high", label: "High" },
 ] as const;
 
+const NONLOCAL_TYPES = new Set(["process", "http", "openclaw_gateway"]);
+const CLI_ADAPTER_TYPES = new Set([
+  "claude_local",
+  "codex_local",
+  "cursor",
+  "gemini_local",
+  "opencode_local",
+  "pi_local",
+  "hermes_local",
+]);
+
+const API_ADAPTER_TYPES = new Set([
+  "openai_api",
+  "anthropic_api",
+  "gemini_api",
+  "openai_compatible",
+]);
+
 
 /* ---- Form ---- */
 
@@ -211,7 +237,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   });
 
   // ---- Edit mode: overlay for dirty tracking ----
-  const [overlay, setOverlay] = useState<Overlay>(emptyOverlay);
+  const [overlay, setOverlay] = useState<AgentConfigOverlay>(emptyOverlay);
   const agentRef = useRef<Agent | null>(null);
 
   // Clear overlay when agent data refreshes (after save)
@@ -227,14 +253,14 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const isDirty = !isCreate && isOverlayDirty(overlay);
 
   /** Read effective value: overlay if dirty, else original */
-  function eff<T>(group: keyof Omit<Overlay, "adapterType">, field: string, original: T): T {
+  function eff<T>(group: keyof Omit<AgentConfigOverlay, "adapterType">, field: string, original: T): T {
     const o = overlay[group];
     if (field in o) return o[field] as T;
     return original;
   }
 
   /** Mark field dirty in overlay */
-  function mark(group: keyof Omit<Overlay, "adapterType">, field: string, value: unknown) {
+  function mark(group: keyof Omit<AgentConfigOverlay, "adapterType">, field: string, value: unknown) {
     setOverlay((prev) => ({
       ...prev,
       [group]: { ...prev[group], [field]: value },
@@ -248,48 +274,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
 
   const handleSave = useCallback(() => {
     if (isCreate || !isDirty) return;
-    const agent = props.agent;
-    const patch: Record<string, unknown> = {};
-
-    if (Object.keys(overlay.identity).length > 0) {
-      Object.assign(patch, overlay.identity);
-    }
-    if (overlay.adapterType !== undefined) {
-      patch.adapterType = overlay.adapterType;
-      // When adapter type changes, replace adapter-specific fields but preserve
-      // adapter-agnostic fields (env, promptTemplate, etc.) that are shared
-      // across all adapter types.
-      const existing = (agent.adapterConfig ?? {}) as Record<string, unknown>;
-      const adapterAgnosticKeys = [
-        "env",
-        "promptTemplate",
-        "instructionsFilePath",
-        "cwd",
-        "timeoutSec",
-        "graceSec",
-        "bootstrapPromptTemplate",
-      ];
-      const preserved: Record<string, unknown> = {};
-      for (const key of adapterAgnosticKeys) {
-        if (key in existing) {
-          preserved[key] = existing[key];
-        }
-      }
-      patch.adapterConfig = { ...preserved, ...overlay.adapterConfig };
-    } else if (Object.keys(overlay.adapterConfig).length > 0) {
-      const existing = (agent.adapterConfig ?? {}) as Record<string, unknown>;
-      patch.adapterConfig = { ...existing, ...overlay.adapterConfig };
-    }
-    if (Object.keys(overlay.heartbeat).length > 0) {
-      const existingRc = (agent.runtimeConfig ?? {}) as Record<string, unknown>;
-      const existingHb = (existingRc.heartbeat ?? {}) as Record<string, unknown>;
-      patch.runtimeConfig = { ...existingRc, heartbeat: { ...existingHb, ...overlay.heartbeat } };
-    }
-    if (Object.keys(overlay.runtime).length > 0) {
-      Object.assign(patch, overlay.runtime);
-    }
-
-    props.onSave(patch);
+    props.onSave(buildAgentUpdatePatch(props.agent, overlay));
   }, [isCreate, isDirty, overlay, props]);
 
   useEffect(() => {
@@ -317,12 +302,37 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const adapterType = isCreate
     ? props.values.adapterType
     : overlay.adapterType ?? props.agent.adapterType;
-  const NONLOCAL_TYPES = new Set(["process", "http", "openclaw_gateway"]);
-  const isLocal = !NONLOCAL_TYPES.has(adapterType);
+  const getCapabilities = useAdapterCapabilities();
+  const adapterCaps = getCapabilities(adapterType);
+  const isLocal = adapterCaps.supportsInstructionsBundle || adapterCaps.supportsSkills || adapterCaps.supportsLocalAgentJwt;
+  const isApiAdapter = API_ADAPTER_TYPES.has(adapterType);
+  const showCliCommandFields = CLI_ADAPTER_TYPES.has(adapterType);
+  const supportsDetectModel = CLI_ADAPTER_TYPES.has(adapterType);
   
   const showLegacyWorkingDirectoryField =
     isLocal && shouldShowLegacyWorkingDirectoryField({ isCreate, adapterConfig: config });
   const uiAdapter = useMemo(() => getUIAdapter(adapterType), [adapterType]);
+  const currentEnvConfig = isCreate
+    ? ((props.values.envBindings ?? EMPTY_ENV) as Record<string, EnvBinding>)
+    : (eff("adapterConfig", "env", (config.env ?? EMPTY_ENV) as Record<string, EnvBinding>));
+  const currentBaseUrl = isCreate
+    ? (props.values.baseUrl ?? "")
+    : eff("adapterConfig", "baseUrl", String(config.baseUrl ?? ""));
+  const currentHeaders = isCreate
+    ? (props.values.headersJson ?? "")
+    : JSON.stringify(eff("adapterConfig", "headers", config.headers ?? {}));
+  const apiAdapterMetadata = getApiAdapterMetadata(adapterType);
+  const currentApiCredentialBinding =
+    apiAdapterMetadata !== null
+      ? currentEnvConfig[apiAdapterMetadata.credentialKey]
+      : undefined;
+  const hasRequiredApiCredential =
+    !isApiAdapter ||
+    (apiAdapterMetadata !== null && hasUsableEnvBinding(currentApiCredentialBinding));
+  const hasRequiredApiDiscoveryConfig =
+    !isApiAdapter ||
+    (hasRequiredApiCredential &&
+      (adapterType !== "openai_compatible" || currentBaseUrl.trim().length > 0));
 
   // Fetch adapter models for the effective adapter type
   const {
@@ -333,9 +343,30 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       ? queryKeys.agents.adapterModels(selectedCompanyId, adapterType)
       : ["agents", "none", "adapter-models", adapterType],
     queryFn: () => agentsApi.adapterModels(selectedCompanyId!, adapterType),
-    enabled: Boolean(selectedCompanyId),
+    enabled: Boolean(selectedCompanyId) && !isApiAdapter,
   });
-  const models = fetchedModels ?? externalModels ?? [];
+  const [discoveredApiModels, setDiscoveredApiModels] = useState<AdapterModel[] | null>(null);
+  useEffect(() => {
+    setDiscoveredApiModels(null);
+  }, [adapterType, selectedCompanyId]);
+  useEffect(() => {
+    if (!isApiAdapter) return;
+    setDiscoveredApiModels(null);
+  }, [isApiAdapter, currentEnvConfig, currentBaseUrl, currentHeaders]);
+  const discoverApiModels = useMutation({
+    mutationFn: async () => {
+      if (!selectedCompanyId) {
+        throw new Error("Select a company to load adapter models");
+      }
+      return agentsApi.adapterModels(selectedCompanyId, adapterType, buildAdapterConfigForTest());
+    },
+    onSuccess: (nextModels) => {
+      setDiscoveredApiModels(nextModels);
+    },
+  });
+  const models = isApiAdapter
+    ? (discoveredApiModels ?? [])
+    : fetchedModels ?? externalModels ?? [];
   const {
     data: detectedModelData,
     refetch: refetchDetectedModel,
@@ -349,7 +380,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       }
       return agentsApi.detectModel(selectedCompanyId, adapterType);
     },
-    enabled: Boolean(selectedCompanyId && isLocal),
+    enabled: Boolean(selectedCompanyId && supportsDetectModel),
   });
   const detectedModel = detectedModelData?.model ?? null;
   const detectedModelCandidates = detectedModelData?.candidates ?? [];
@@ -372,6 +403,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     mark: mark as (group: "adapterConfig", field: string, value: unknown) => void,
     models,
     hideInstructionsFile,
+    availableSecrets,
+    onCreateSecret: async (name: string, value: string) => createSecret.mutateAsync({ name, value }),
   };
 
   // Section toggle state — advanced always starts collapsed
@@ -439,7 +472,11 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       : adapterType === "opencode_local"
         ? eff("adapterConfig", "variant", String(config.variant ?? ""))
       : eff("adapterConfig", "effort", String(config.effort ?? ""));
-  const showThinkingEffort = adapterType !== "gemini_local";
+  const showThinkingEffort =
+    adapterType === "claude_local" ||
+    adapterType === "codex_local" ||
+    adapterType === "cursor" ||
+    adapterType === "opencode_local";
   const codexSearchEnabled = adapterType === "codex_local"
     ? (isCreate ? Boolean(val!.search) : eff("adapterConfig", "search", Boolean(config.search)))
     : false;
@@ -600,6 +637,14 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                       nextValues.model = DEFAULT_CURSOR_LOCAL_MODEL;
                     } else if (t === "opencode_local") {
                       nextValues.model = "";
+                    } else if (t === "openai_api") {
+                      nextValues.model = DEFAULT_OPENAI_API_MODEL;
+                    } else if (t === "anthropic_api") {
+                      nextValues.model = DEFAULT_ANTHROPIC_API_MODEL;
+                    } else if (t === "gemini_api") {
+                      nextValues.model = DEFAULT_GEMINI_API_MODEL;
+                    } else if (t === "openai_compatible") {
+                      nextValues.model = DEFAULT_OPENAI_COMPATIBLE_MODEL;
                     }
                     set!(nextValues);
                   } else {
@@ -616,6 +661,14 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                               ? DEFAULT_GEMINI_LOCAL_MODEL
                             : t === "cursor"
                               ? DEFAULT_CURSOR_LOCAL_MODEL
+                            : t === "openai_api"
+                              ? DEFAULT_OPENAI_API_MODEL
+                            : t === "anthropic_api"
+                              ? DEFAULT_ANTHROPIC_API_MODEL
+                            : t === "gemini_api"
+                              ? DEFAULT_GEMINI_API_MODEL
+                            : t === "openai_compatible"
+                              ? DEFAULT_OPENAI_COMPATIBLE_MODEL
                             : "",
                         effort: "",
                         modelReasoningEffort: "",
@@ -700,13 +753,14 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
       </div>
 
       {/* ---- Permissions & Configuration ---- */}
-      {isLocal && (
+          {isLocal && (
         <div className={cn(!cards && "border-b border-border")}>
           {cards
             ? <h3 className="text-sm font-medium mb-3">Permissions &amp; Configuration</h3>
             : <div className="px-4 py-2 text-xs font-medium text-muted-foreground">Permissions &amp; Configuration</div>
           }
           <div className={cn(cards ? "border border-border rounded-lg p-4 space-y-3" : "px-4 pb-3 space-y-3")}>
+              {showCliCommandFields && (
               <Field label="Command" hint={help.localCommand}>
                 <DraftInput
                   value={
@@ -733,6 +787,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   }
                 />
               </Field>
+              )}
 
               <ModelDropdown
                 models={models}
@@ -744,24 +799,65 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                 }
                 open={modelOpen}
                 onOpenChange={setModelOpen}
-                allowDefault={adapterType !== "opencode_local"}
-                required={adapterType === "opencode_local"}
+                allowDefault={!isApiAdapter && adapterType !== "opencode_local"}
+                required={isApiAdapter || adapterType === "opencode_local"}
                 groupByProvider={adapterType === "opencode_local"}
                 creatable
                 detectedModel={detectedModel}
                 detectedModelCandidates={[]}
-                onDetectModel={async () => {
-                  const result = await refetchDetectedModel();
-                  return result.data?.model ?? null;
-                }}
-                detectModelLabel="Detect model"
-                emptyDetectHint="No model detected. Select or enter one manually."
+                onDetectModel={supportsDetectModel
+                  ? async () => {
+                      const result = await refetchDetectedModel();
+                      return result.data?.model ?? null;
+                    }
+                  : undefined}
+                detectModelLabel={supportsDetectModel ? "Detect model" : undefined}
+                emptyDetectHint={
+                  supportsDetectModel ? "No model detected. Select or enter one manually." : undefined
+                }
               />
+              {isApiAdapter && (
+                <>
+                  <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">
+                      {apiAdapterMetadata?.discoveryHint ?? "Load the live provider model list using the current provider configuration."}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2.5 text-xs shrink-0"
+                      onClick={() => discoverApiModels.mutate()}
+                      disabled={
+                        discoverApiModels.isPending ||
+                        !selectedCompanyId ||
+                        !hasRequiredApiDiscoveryConfig
+                      }
+                    >
+                      {discoverApiModels.isPending ? "Loading..." : "Load models"}
+                    </Button>
+                  </div>
+                  {!hasRequiredApiDiscoveryConfig && apiAdapterMetadata && (
+                    <p className="text-xs text-muted-foreground">
+                      {adapterType === "openai_compatible"
+                        ? "Enter a bearer API key and a Base URL to load live models. Use a URL that includes /v1 when your provider expects it."
+                        : `Enter a valid ${apiAdapterMetadata.credentialLabel.toLowerCase()} to load live models.`}
+                    </p>
+                  )}
+                </>
+              )}
               {fetchedModelsError && (
                 <p className="text-xs text-destructive">
                   {fetchedModelsError instanceof Error
                     ? fetchedModelsError.message
                     : "Failed to load adapter models."}
+                </p>
+              )}
+              {discoverApiModels.error && (
+                <p className="text-xs text-destructive">
+                  {discoverApiModels.error instanceof Error
+                    ? discoverApiModels.error.message
+                    : "Failed to discover adapter models."}
                 </p>
               )}
 
@@ -818,6 +914,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
               )}
               <uiAdapter.ConfigFields {...adapterFieldProps} />
 
+              {showCliCommandFields && (
               <Field label="Extra args (comma-separated)" hint={help.extraArgs}>
                 <DraftInput
                   value={
@@ -835,27 +932,31 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
                   placeholder="e.g. --verbose, --foo=bar"
                 />
               </Field>
+              )}
 
-              <Field label="Environment variables" hint={help.envVars}>
-                <EnvVarEditor
-                  value={
-                    isCreate
-                      ? ((val!.envBindings ?? EMPTY_ENV) as Record<string, EnvBinding>)
-                      : ((eff("adapterConfig", "env", (config.env ?? EMPTY_ENV) as Record<string, EnvBinding>))
-                      )
-                  }
-                  secrets={availableSecrets}
-                  onCreateSecret={async (name, value) => {
-                    const created = await createSecret.mutateAsync({ name, value });
-                    return created;
-                  }}
-                  onChange={(env) =>
-                    isCreate
-                      ? set!({ envBindings: env ?? {}, envVars: "" })
-                      : mark("adapterConfig", "env", env)
-                  }
-                />
-              </Field>
+              {!isApiAdapter && (
+                <Field label="Environment variables" hint={help.envVars}>
+                  <EnvVarEditor
+                    value={
+                      isCreate
+                        ? ((val!.envBindings ?? EMPTY_ENV) as Record<string, EnvBinding>)
+                        : ((eff("adapterConfig", "env", (config.env ?? EMPTY_ENV) as Record<string, EnvBinding>))
+                        )
+                    }
+                    secrets={availableSecrets}
+                    onCreateSecret={async (name, value) => {
+                      const created = await createSecret.mutateAsync({ name, value });
+                      return created;
+                    }}
+                    onChange={(env) =>
+                      isCreate
+                        ? set!({ envBindings: env ?? {}, envVars: "" })
+                        : mark("adapterConfig", "env", env)
+                    }
+                  />
+                </Field>
+              )}
+
 
               {/* Edit-only: timeout + grace period */}
               {!isCreate && (

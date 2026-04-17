@@ -20,6 +20,19 @@ import {
 } from "@paperclipai/adapter-codex-local/server";
 import { agentConfigurationDoc as codexAgentConfigurationDoc, models as codexModels } from "@paperclipai/adapter-codex-local";
 import {
+  execute as openAiApiExecute,
+  listModels as listOpenAiApiModels,
+  testEnvironment as openAiApiTestEnvironment,
+  sessionCodec as openAiApiSessionCodec,
+} from "@paperclipai/adapter-openai-api/server";
+import { agentConfigurationDoc as openAiApiAgentConfigurationDoc, models as openAiApiModels } from "@paperclipai/adapter-openai-api";
+import {
+  execute as anthropicApiExecute,
+  listModels as listAnthropicApiModels,
+  testEnvironment as anthropicApiTestEnvironment,
+} from "@paperclipai/adapter-anthropic-api/server";
+import { agentConfigurationDoc as anthropicApiAgentConfigurationDoc, models as anthropicApiModels } from "@paperclipai/adapter-anthropic-api";
+import {
   execute as cursorExecute,
   listCursorSkills,
   syncCursorSkills,
@@ -28,6 +41,12 @@ import {
 } from "@paperclipai/adapter-cursor-local/server";
 import { agentConfigurationDoc as cursorAgentConfigurationDoc, models as cursorModels } from "@paperclipai/adapter-cursor-local";
 import {
+  execute as geminiApiExecute,
+  listModels as listGeminiApiModels,
+  testEnvironment as geminiApiTestEnvironment,
+} from "@paperclipai/adapter-gemini-api/server";
+import { agentConfigurationDoc as geminiApiAgentConfigurationDoc, models as geminiApiModels } from "@paperclipai/adapter-gemini-api";
+import {
   execute as geminiExecute,
   listGeminiSkills,
   syncGeminiSkills,
@@ -35,6 +54,12 @@ import {
   sessionCodec as geminiSessionCodec,
 } from "@paperclipai/adapter-gemini-local/server";
 import { agentConfigurationDoc as geminiAgentConfigurationDoc, models as geminiModels } from "@paperclipai/adapter-gemini-local";
+import {
+  execute as openAiCompatibleExecute,
+  listModels as listOpenAiCompatibleModels,
+  testEnvironment as openAiCompatibleTestEnvironment,
+} from "@paperclipai/adapter-openai-compatible/server";
+import { agentConfigurationDoc as openAiCompatibleAgentConfigurationDoc, models as openAiCompatibleModels } from "@paperclipai/adapter-openai-compatible";
 import {
   execute as openCodeExecute,
   listOpenCodeSkills,
@@ -97,6 +122,9 @@ const claudeLocalAdapter: ServerAdapterModule = {
   models: claudeModels,
   listModels: listClaudeModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: claudeAgentConfigurationDoc,
   getQuotaWindows: claudeGetQuotaWindows,
 };
@@ -112,8 +140,33 @@ const codexLocalAdapter: ServerAdapterModule = {
   models: codexModels,
   listModels: listCodexModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: codexAgentConfigurationDoc,
   getQuotaWindows: codexGetQuotaWindows,
+};
+
+const openAiApiAdapter: ServerAdapterModule = {
+  type: "openai_api",
+  execute: openAiApiExecute,
+  testEnvironment: openAiApiTestEnvironment,
+  sessionCodec: openAiApiSessionCodec,
+  sessionManagement: getAdapterSessionManagement("openai_api") ?? undefined,
+  models: openAiApiModels,
+  listModels: listOpenAiApiModels,
+  supportsLocalAgentJwt: false,
+  agentConfigurationDoc: openAiApiAgentConfigurationDoc,
+};
+
+const anthropicApiAdapter: ServerAdapterModule = {
+  type: "anthropic_api",
+  execute: anthropicApiExecute,
+  testEnvironment: anthropicApiTestEnvironment,
+  models: anthropicApiModels,
+  listModels: listAnthropicApiModels,
+  supportsLocalAgentJwt: false,
+  agentConfigurationDoc: anthropicApiAgentConfigurationDoc,
 };
 
 const cursorLocalAdapter: ServerAdapterModule = {
@@ -127,6 +180,9 @@ const cursorLocalAdapter: ServerAdapterModule = {
   models: cursorModels,
   listModels: listCursorModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: true,
   agentConfigurationDoc: cursorAgentConfigurationDoc,
 };
 
@@ -140,7 +196,30 @@ const geminiLocalAdapter: ServerAdapterModule = {
   sessionManagement: getAdapterSessionManagement("gemini_local") ?? undefined,
   models: geminiModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: true,
   agentConfigurationDoc: geminiAgentConfigurationDoc,
+};
+
+const geminiApiAdapter: ServerAdapterModule = {
+  type: "gemini_api",
+  execute: geminiApiExecute,
+  testEnvironment: geminiApiTestEnvironment,
+  models: geminiApiModels,
+  listModels: listGeminiApiModels,
+  supportsLocalAgentJwt: false,
+  agentConfigurationDoc: geminiApiAgentConfigurationDoc,
+};
+
+const openAiCompatibleAdapter: ServerAdapterModule = {
+  type: "openai_compatible",
+  execute: openAiCompatibleExecute,
+  testEnvironment: openAiCompatibleTestEnvironment,
+  models: openAiCompatibleModels,
+  listModels: listOpenAiCompatibleModels,
+  supportsLocalAgentJwt: false,
+  agentConfigurationDoc: openAiCompatibleAgentConfigurationDoc,
 };
 
 const openclawGatewayAdapter: ServerAdapterModule = {
@@ -149,6 +228,8 @@ const openclawGatewayAdapter: ServerAdapterModule = {
   testEnvironment: openclawGatewayTestEnvironment,
   models: openclawGatewayModels,
   supportsLocalAgentJwt: false,
+  supportsInstructionsBundle: false,
+  requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: openclawGatewayAgentConfigurationDoc,
 };
 
@@ -163,6 +244,9 @@ const openCodeLocalAdapter: ServerAdapterModule = {
   sessionManagement: getAdapterSessionManagement("opencode_local") ?? undefined,
   listModels: listOpenCodeModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: true,
   agentConfigurationDoc: openCodeAgentConfigurationDoc,
 };
 
@@ -177,6 +261,9 @@ const piLocalAdapter: ServerAdapterModule = {
   models: [],
   listModels: listPiModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: true,
   agentConfigurationDoc: piAgentConfigurationDoc,
 };
 
@@ -189,6 +276,9 @@ const hermesLocalAdapter: ServerAdapterModule = {
   syncSkills: hermesSyncSkills,
   models: hermesModels,
   supportsLocalAgentJwt: true,
+  supportsInstructionsBundle: true,
+  instructionsPathKey: "instructionsFilePath",
+  requiresMaterializedRuntimeSkills: false,
   agentConfigurationDoc: hermesAgentConfigurationDoc,
   detectModel: () => detectModelFromHermes(),
 };
@@ -208,10 +298,14 @@ function registerBuiltInAdapters() {
   for (const adapter of [
     claudeLocalAdapter,
     codexLocalAdapter,
+    openAiApiAdapter,
+    anthropicApiAdapter,
     openCodeLocalAdapter,
     piLocalAdapter,
     cursorLocalAdapter,
     geminiLocalAdapter,
+    geminiApiAdapter,
+    openAiCompatibleAdapter,
     openclawGatewayAdapter,
     hermesLocalAdapter,
     processAdapter,
@@ -317,11 +411,14 @@ export function getServerAdapter(type: string): ServerAdapterModule {
   return findActiveServerAdapter(type) ?? processAdapter;
 }
 
-export async function listAdapterModels(type: string): Promise<{ id: string; label: string }[]> {
+export async function listAdapterModels(
+  type: string,
+  ctx?: { companyId: string; adapterType: string; config: Record<string, unknown> },
+): Promise<{ id: string; label: string }[]> {
   const adapter = findActiveServerAdapter(type);
   if (!adapter) return [];
   if (adapter.listModels) {
-    const discovered = await adapter.listModels();
+    const discovered = await adapter.listModels(ctx);
     if (discovered.length > 0) return discovered;
   }
   return adapter.models ?? [];
